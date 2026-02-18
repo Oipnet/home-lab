@@ -1,0 +1,8 @@
+# Chiffrer ce fichier avec : ansible-vault encrypt group_vars/all/vault.yml
+# Créer : cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#         ansible-vault encrypt group_vars/all/vault.yml
+---
+# Aucun secret requis pour l'instant.
+# Le vault sera complété lors de l'intégration NAS :
+#   vault_nas_public_key: "BASE64_NAS_WG_PUBLIC_KEY"
+#   vault_nas_endpoint:   "your-ddns.example.com:51820"

@@ -1,0 +1,105 @@
+name: Kubernetes Manifests CI
+
+on:
+  push:
+    paths:
+      - "kubernetes/**"
+    branches: ["main", "feat/**", "fix/**"]
+  pull_request:
+    paths:
+      - "kubernetes/**"
+
+permissions:
+  contents: read
+
+jobs:
+  # ── kubeval — schema validation ──────────────────────────────────────────────
+  kubeval:
+    name: kubeval
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubeval
+        run: |
+          curl -sL https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz \
+            | tar xz && sudo mv kubeval /usr/local/bin/
+
+      - name: Validate all manifests
+        run: |
+          find kubernetes/ -name "*.yaml" -not -name "*.example*" \
+            | xargs kubeval \
+                --strict \
+                --ignore-missing-schemas \
+                --kubernetes-version 1.29.0
+
+  # ── kube-score — best practices ─────────────────────────────────────────────
+  kube-score:
+    name: kube-score
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kube-score
+        run: |
+          curl -sL https://github.com/zegl/kube-score/releases/latest/download/kube-score_linux_amd64.tar.gz \
+            | tar xz && sudo mv kube-score /usr/local/bin/
+
+      - name: Score manifests
+        run: |
+          find kubernetes/ -name "*.yaml" -not -name "*.example*" \
+            | xargs kube-score score \
+                --ignore-test pod-probes \       # Plex has custom probes
+                --output-format ci \
+                || true                          # informational — don't block
+
+  # ── Trivy — container image scan ────────────────────────────────────────────
+  trivy-image:
+    name: Trivy image scan (Plex)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract Plex image from deployment
+        id: image
+        run: |
+          IMAGE=$(grep 'image:' kubernetes/plex/deployment.yaml | awk '{print $2}')
+          echo "plex_image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.image.outputs.plex_image }}
+          format: "table"
+          exit-code: "0"          # informational only
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH"
+
+  # ── Dry-run against kind cluster ─────────────────────────────────────────────
+  dry-run:
+    name: kubectl dry-run (kind)
+    runs-on: ubuntu-latest
+    needs: [kubeval, kube-score]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          kubernetes_version: "v1.29.2"
+
+      - name: Apply namespaces
+        run: kubectl apply -f kubernetes/namespaces/
+
+      - name: Dry-run all manifests (server-side)
+        run: |
+          find kubernetes/ -name "*.yaml" \
+            -not -name "*.example*" \
+            -not -path "*/namespaces/*" \
+            -not -path "*/secrets/*" \
+            | sort | xargs -I{} kubectl apply --dry-run=server -f {} \
+            || true   # PVs referencing NFS will fail on kind — expected

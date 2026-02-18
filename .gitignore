@@ -1,0 +1,44 @@
+# ── Terraform ─────────────────────────────────────────────────────────────────
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform/.terraform/
+terraform/terraform.tfvars
+tfplan
+
+# ── Ansible ───────────────────────────────────────────────────────────────────
+ansible/group_vars/all/vault.yml
+ansible/inventory/hosts.ini          # generated from Terraform output
+*.retry
+.ansible-vault-pass
+~/.ansible-vault-pass
+
+# ── Kubernetes ────────────────────────────────────────────────────────────────
+.kube/
+kubernetes/secrets/*.yaml
+!kubernetes/secrets/*.yaml.example
+
+# ── WireGuard keys ────────────────────────────────────────────────────────────
+wireguard/**/*.key
+wireguard/client-vpn/clients/
+
+# ── SSH keys ──────────────────────────────────────────────────────────────────
+*.pem
+id_rsa*
+id_ed25519*
+!id_ed25519.pub
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# ── Secrets / environment ─────────────────────────────────────────────────────
+.env
+*.env
+secrets/
+credentials.json

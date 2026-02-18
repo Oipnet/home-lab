@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and fill in your values.
+# NEVER commit terraform.tfvars — it is gitignored.
+
+project_name        = "homelab"
+zone                = "fr-par-1"
+region              = "fr-par"
+
+control_plane_count = 1
+worker_count        = 2
+control_plane_type  = "DEV1-S"
+plex_worker_type    = "DEV1-M"   # worker-1 : Plex + stockage local
+worker_type         = "DEV1-S"   # worker-2+ : workloads légers
+
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+allowed_ssh_cidrs = ["YOUR_HOME_IP/32"]
+
+# Plex — stockage local sur worker-1
+plex_data_path = "/data/plex"
+

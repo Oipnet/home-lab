@@ -1,0 +1,118 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+  namespace: traefik
+  labels:
+    app.kubernetes.io/name: traefik
+    app.kubernetes.io/part-of: homelab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # nécessaire avec hostPort — pas de rolling update possible
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+    spec:
+      serviceAccountName: traefik
+
+      # Épingler sur le nœud labelisé "ingress=traefik"
+      nodeSelector:
+        ingress: traefik
+
+      containers:
+        - name: traefik
+          image: traefik:v3
+          imagePullPolicy: IfNotPresent
+
+          args:
+            - --log.level=INFO
+            - --ping                # active le endpoint /ping pour les probes
+            - --ping.entryPoint=web # sert /ping sur le port 80
+
+            # Providers
+            - --providers.kubernetesingress=true
+            - --providers.kubernetesingress.ingressclass=traefik
+
+            # Entrypoints
+            - --entrypoints.web.address=:80
+            - --entrypoints.websecure.address=:443
+
+            # Redirection HTTP → HTTPS automatique
+            - --entrypoints.web.http.redirections.entrypoint.to=websecure
+            - --entrypoints.web.http.redirections.entrypoint.scheme=https
+            - --entrypoints.web.http.redirections.entrypoint.permanent=true
+
+            # ACME Let's Encrypt via DNS-01 OVH
+            - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+            - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=ovh
+            - --certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53
+            - --certificatesresolvers.letsencrypt.acme.email=contact@forelse.fr
+            - --certificatesresolvers.letsencrypt.acme.storage=/data/acme.json
+
+          ports:
+            - name: web
+              containerPort: 80
+              hostPort: 80       # Bind direct sur le nœud → pas de NodePort 30000+
+            - name: websecure
+              containerPort: 443
+              hostPort: 443
+
+          env:
+            # Clés API OVH pour le DNS-01 challenge
+            - name: OVH_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: traefik-ovh-credentials
+                  key: OVH_ENDPOINT
+            - name: OVH_APPLICATION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: traefik-ovh-credentials
+                  key: OVH_APPLICATION_KEY
+            - name: OVH_APPLICATION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: traefik-ovh-credentials
+                  key: OVH_APPLICATION_SECRET
+            - name: OVH_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: traefik-ovh-credentials
+                  key: OVH_CONSUMER_KEY
+
+          volumeMounts:
+            - name: acme
+              mountPath: /data
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: web
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: web
+            initialDelaySeconds: 15
+            periodSeconds: 30
+
+      volumes:
+        - name: acme
+          persistentVolumeClaim:
+            claimName: traefik-acme-pvc

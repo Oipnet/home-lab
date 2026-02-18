@@ -1,0 +1,32 @@
+---
+# ATTENTION : Headlamp expose l'intégralité du cluster K8s.
+# Envisager de restreindre l'accès (VPN, IP allowlist, auth middleware).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: headlamp
+  namespace: headlamp
+  labels:
+    app.kubernetes.io/name: headlamp
+    app.kubernetes.io/part-of: homelab
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: headlamp.forelse.fr
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: headlamp
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - headlamp.forelse.fr
+      secretName: headlamp-tls

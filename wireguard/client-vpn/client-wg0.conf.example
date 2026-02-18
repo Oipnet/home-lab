@@ -1,0 +1,26 @@
+# WireGuard config pour un CLIENT EXTERNE voulant accéder à Plex.
+# Installer WireGuard sur le téléphone/laptop et importer ce fichier.
+# Remplacer toutes les valeurs CHANGE_ME.
+#
+# Générer une paire de clés client :
+#   wg genkey | tee client.key | wg pubkey > client.pub
+# Puis ajouter un bloc [Peer] dans le wg0.conf du serveur :
+#   [Peer]
+#   PublicKey  = <contenu de client.pub>
+#   AllowedIPs = 10.201.0.2/32   (IP unique par client)
+# Et recharger : sudo wg syncconf wg0 <(wg-quick strip wg0)
+#
+# Ou utiliser le script gen-wireguard-client.sh qui automatise tout ça.
+
+[Interface]
+Address    = 10.201.0.2/32
+PrivateKey = CHANGE_ME_CLIENT_PRIVATE_KEY
+DNS        = 1.1.1.1
+
+[Peer]
+# Control plane Scaleway — serveur VPN Plex (wg0)
+PublicKey           = CHANGE_ME_SERVER_WG0_PUBLIC_KEY   # affiché par le playbook Ansible
+Endpoint            = CHANGE_ME_CP_PUBLIC_IP:51820
+# Split tunnel : seul le trafic Plex passe par le VPN
+AllowedIPs          = 10.201.0.0/24
+PersistentKeepalive = 25

@@ -1,0 +1,19 @@
+---
+# ClusterIP service — internal cluster access
+apiVersion: v1
+kind: Service
+metadata:
+  name: headlamp
+  namespace: headlamp
+  labels:
+    app.kubernetes.io/name: headlamp
+spec:
+  selector:
+    app: headlamp
+  ports:
+    - name: http
+      port: 4466
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP
+

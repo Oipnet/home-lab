@@ -1,0 +1,28 @@
+---
+# Stockage persistant pour les certificats ACME Let's Encrypt (acme.json).
+# Prérequis : labelliser le nœud ingress avant apply
+#   kubectl label node <worker> ingress=traefik
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: traefik-acme-pv
+  labels:
+    app: traefik
+    volume: acme
+spec:
+  capacity:
+    storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /data/traefik/acme
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: ingress
+              operator: In
+              values:
+                - traefik
