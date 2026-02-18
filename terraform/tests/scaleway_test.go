@@ -2,6 +2,7 @@ package test
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -147,6 +148,16 @@ func TestScalewayCluster(t *testing.T) {
 func TestTerraformPlan(t *testing.T) {
 	t.Parallel()
 
+	// Generate a temporary SSH key so the plan can resolve file(var.ssh_public_key_path)
+	// without requiring ~/.ssh/id_ed25519.pub to exist (e.g. in CI).
+	keyPair := ssh.GenerateRSAKeyPair(t, 2048)
+	tmpKey, err := os.CreateTemp("", "ci-ssh-*.pub")
+	require.NoError(t, err)
+	defer os.Remove(tmpKey.Name())
+	_, err = tmpKey.WriteString(keyPair.PublicKey)
+	require.NoError(t, err)
+	tmpKey.Close()
+
 	terraformOptions := &terraform.Options{
 		TerraformDir: "../",
 		Vars: map[string]interface{}{
@@ -155,6 +166,7 @@ func TestTerraformPlan(t *testing.T) {
 			"worker_count":        2,
 			"plex_worker_type":    "DEV1-S",
 			"worker_type":         "DEV1-S",
+			"ssh_public_key_path": tmpKey.Name(),
 		},
 		PlanFilePath: "/tmp/homelab-tfplan",
 	}

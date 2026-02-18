@@ -43,18 +43,18 @@ resource "scaleway_instance_security_group" "control_plane" {
 
   # etcd peer
   inbound_rule {
-    action   = "accept"
+    action     = "accept"
     port_range = "2379-2380"
-    protocol = "TCP"
-    ip_range = "0.0.0.0/0"
+    protocol   = "TCP"
+    ip_range   = "0.0.0.0/0"
   }
 
   # kubelet, kube-scheduler, kube-controller-manager
   inbound_rule {
-    action   = "accept"
+    action     = "accept"
     port_range = "10250-10259"
-    protocol = "TCP"
-    ip_range = "0.0.0.0/0"
+    protocol   = "TCP"
+    ip_range   = "0.0.0.0/0"
   }
 
   # WireGuard — Plex client VPN (wg1)
@@ -157,7 +157,7 @@ resource "scaleway_instance_server" "control_plane" {
 resource "scaleway_instance_server" "worker" {
   count = var.worker_count
 
-  name  = "${var.project_name}-worker-${count.index + 1}"
+  name = "${var.project_name}-worker-${count.index + 1}"
   # worker-1 (index 0) = Plex + stockage local → DEV1-M
   # worker-2+ (index 1+) = workloads légers → DEV1-S
   type  = count.index == 0 ? var.plex_worker_type : var.worker_type

@@ -1,6 +1,6 @@
 # Home Lab — Kubernetes sur Scaleway + Plex
 
-Cluster Kubernetes de 3 nœuds déployé sur Scaleway (~65 €/mois). Plex est accessible localement (NodePort) et depuis l'extérieur via WireGuard. Le stockage est local sur un worker dédié.
+Cluster Kubernetes de 3 nœuds déployé sur Scaleway (~65 €/mois). Plex et Headlamp sont exposés en HTTPS via Traefik + Let's Encrypt (DNS challenge OVH). Le stockage est local sur un worker dédié.
 
 > **NAS** : l'intégration NAS/NFS sera ajoutée dans une prochaine étape.
 
@@ -8,6 +8,9 @@ Cluster Kubernetes de 3 nœuds déployé sur Scaleway (~65 €/mois). Plex est a
 
 ```
 Internet
+    │
+    ├── :80/:443 ──► Traefik (hostPort) ──► plex.forelse.fr
+    │                                   └─► headlamp.forelse.fr
     │
     ├── WireGuard wg0 (port 51820) ──► Clients externes ──► Plex
     │
@@ -19,6 +22,7 @@ Internet
 │  │  cp-1        │◄───────────────────────────────────┐  │
 │  │  DEV1-S      │   kubeadm API :6443                 │  │
 │  │  WG server   │   WireGuard wg0 :51820              │  │
+│  │  Traefik     │   hostPort :80/:443                 │  │
 │  └──────────────┘                                     │  │
 │                                                        │  │
 │  ┌──────────────┐  ┌──────────────┐                   │  │
@@ -52,14 +56,29 @@ home-lab/
 │       ├── kubernetes.yml   # kubeadm init → Flannel → join → labels
 │       └── wireguard.yml    # wg0 (VPN Plex clients)
 ├── kubernetes/
-│   ├── namespaces/plex.yaml
+│   ├── namespaces/
 │   ├── storage/local-storage-class.yaml
+│   ├── traefik/
+│   │   ├── deployment.yaml          # hostPort :80/:443, cert OVH DNS
+│   │   ├── service.yaml             # ClusterIP interne
+│   │   ├── ingressclass.yaml        # IngressClass par défaut
+│   │   ├── rbac.yaml
+│   │   ├── persistent-volume.yaml   # Stockage certificats ACME
+│   │   └── persistent-volume-claim.yaml
 │   ├── plex/
 │   │   ├── deployment.yaml          # nodeSelector: storage=plex
 │   │   ├── service.yaml             # NodePort + ClusterIP
+│   │   ├── ingress.yaml             # plex.forelse.fr (TLS)
 │   │   ├── persistent-volume.yaml   # local sur worker-1
 │   │   └── persistent-volume-claim.yaml
-│   └── secrets/plex-claim-token.yaml.example
+│   ├── headlamp/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   ├── ingress.yaml             # headlamp.forelse.fr (TLS)
+│   │   └── rbac.yaml
+│   └── secrets/
+│       ├── plex-claim-token.yaml.example
+│       └── traefik-ovh-credentials.yaml  # gitignored
 ├── wireguard/
 │   └── client-vpn/
 │       └── client-wg0.conf.example
@@ -132,7 +151,16 @@ Ou étape par étape :
 ./scripts/init-cluster.sh workloads    # 5. Déployer Plex
 ```
 
-### 4. Accéder à Plex
+### 4. Accéder aux services
+
+**Via HTTPS (Traefik + Let's Encrypt)** :
+
+| Service | URL |
+|---------|-----|
+| Plex | https://plex.forelse.fr |
+| Headlamp | https://headlamp.forelse.fr |
+
+> **Headlamp** expose l'intégralité du cluster Kubernetes. Restreindre l'accès via VPN ou IP allowlist en production.
 
 **Local** : `http://<IP-worker-1>:32400/web`
 
@@ -172,11 +200,24 @@ Les dossiers sont créés par Ansible (`common.yml`). Le `nodeSelector: storage=
 | Client 1 | wg0 | 10.201.0.2/32 |
 | Client 2 | wg0 | 10.201.0.3/32 |
 
+## Ingress & HTTPS
+
+Traefik tourne sur le control plane en **hostPort** (pas de LoadBalancer externe nécessaire). Les certificats sont émis via **Let's Encrypt DNS challenge OVH** — aucun port 80 entrant requis pour la validation ACME.
+
+| Ingress | Host | Namespace | TLS |
+|---------|------|-----------|-----|
+| plex | plex.forelse.fr | plex | ✅ Let's Encrypt |
+| headlamp | headlamp.forelse.fr | headlamp | ✅ Let's Encrypt |
+
+Les credentials OVH pour le DNS challenge sont dans `kubernetes/secrets/traefik-ovh-credentials.yaml` (gitignored).
+
 ## Pare-feu — ports ouverts
 
 | Port | Proto | Usage |
 |------|-------|-------|
 | 22 | TCP | SSH (restreindre à votre IP) |
+| 80 | TCP | Traefik HTTP (redirect → HTTPS) |
+| 443 | TCP | Traefik HTTPS |
 | 6443 | TCP | Kubernetes API |
 | 51820 | UDP | WireGuard Plex VPN |
 | 30000-32767 | TCP | NodePort (Plex sur 32400) |
@@ -210,5 +251,4 @@ Seuls les fichiers `*.example` sont commités — ils ne contiennent aucune vrai
 
 - [ ] Intégration NAS (WireGuard wg1 cluster↔NAS + NFS StorageClass)
 - [ ] Haute disponibilité (3 control planes)
-- [ ] Ingress Controller (Traefik ou nginx)
-- [ ] Cert-manager + HTTPS
+- [ ] Middleware Traefik — auth basique ou IP allowlist sur Headlamp

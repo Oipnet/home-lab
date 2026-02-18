@@ -4,10 +4,13 @@ on:
   push:
     paths:
       - "kubernetes/**"
+      - ".github/workflows/kubernetes.yml"
     branches: ["main", "feat/**", "fix/**"]
   pull_request:
     paths:
       - "kubernetes/**"
+      - ".github/workflows/kubernetes.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -44,16 +47,20 @@ jobs:
 
       - name: Install kube-score
         run: |
-          curl -sL https://github.com/zegl/kube-score/releases/latest/download/kube-score_linux_amd64.tar.gz \
-            | tar xz && sudo mv kube-score /usr/local/bin/
+          DOWNLOAD_URL=$(curl -s https://api.github.com/repos/zegl/kube-score/releases/latest \
+            | grep browser_download_url \
+            | grep linux_amd64.tar.gz \
+            | cut -d '"' -f 4)
+          curl -sL "$DOWNLOAD_URL" | tar xz && sudo mv kube-score /usr/local/bin/
 
       - name: Score manifests
         run: |
+          # --ignore-test pod-probes: Plex has custom probes
           find kubernetes/ -name "*.yaml" -not -name "*.example*" \
             | xargs kube-score score \
-                --ignore-test pod-probes \       # Plex has custom probes
+                --ignore-test pod-probes \
                 --output-format ci \
-                || true                          # informational — don't block
+            || true
 
   # ── Trivy — container image scan ────────────────────────────────────────────
   trivy-image:
@@ -90,7 +97,7 @@ jobs:
       - name: Create kind cluster
         uses: helm/kind-action@v1.10.0
         with:
-          kubernetes_version: "v1.29.2"
+          node_image: kindest/node:v1.29.2
 
       - name: Apply namespaces
         run: kubectl apply -f kubernetes/namespaces/
