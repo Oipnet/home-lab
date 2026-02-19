@@ -1,0 +1,9 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-storage
+# Provisionnement manuel : les PersistentVolumes NFS sont créés à la main.
+# Le scheduler lie automatiquement le PVC au PV correspondant.
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: Immediate
+reclaimPolicy: Retain

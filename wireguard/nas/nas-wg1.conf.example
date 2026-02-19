@@ -1,0 +1,38 @@
+# WireGuard config pour le NAS Synology (côté client du tunnel NAS↔VPS).
+#
+# Pré-requis sur le NAS Synology (DSM 7.2+) :
+#   1. Centre de paquets > installer "WireGuard"
+#   2. Panneau de configuration > Services de fichiers > NFS > Activer le service NFS
+#   3. Dossier partagé (ex. "media") > Modifier > Autorisations NFS :
+#        Hôte/IP  : 10.200.0.1          (IP wg1 du worker-1)
+#        Privilège : Lecture/Écriture
+#        Squash    : Aucun
+#        Sécurité  : sys
+#
+# Pré-requis sur le VPS (worker-1) :
+#   - Exécuter : ansible-playbook playbooks/wireguard-nas.yml
+#   - Récupérer la clé publique wg1 affichée par Ansible.
+#   - Récupérer l'IP publique du worker-1 : terraform output worker_public_ips
+#
+# Processus de mise en place :
+#   1. Exécuter le playbook Ansible → note la clé publique worker-1 wg1.
+#   2. Générer la config NAS et la clé NAS :
+#        ./scripts/gen-wireguard-nas.sh
+#   3. Importer wireguard/nas/nas-wg1.conf sur le NAS via l'interface DSM.
+#   4. Activer le tunnel sur le NAS.
+#   5. Relancer le playbook avec la clé publique du NAS :
+#        ansible-playbook playbooks/wireguard-nas.yml \
+#          -e nas_wg_pubkey=<CLÉ_PUBLIQUE_NAS>
+#   6. Vérifier : ping 10.200.0.1 depuis le NAS, ping 10.200.0.10 depuis worker-1.
+
+[Interface]
+Address    = 10.200.0.10/32
+PrivateKey = CHANGE_ME_NAS_PRIVATE_KEY
+
+[Peer]
+# worker-1 Scaleway — serveur WireGuard NAS tunnel (wg1)
+PublicKey           = CHANGE_ME_WORKER1_WG1_PUBLIC_KEY   # affiché par wireguard-nas.yml
+Endpoint            = CHANGE_ME_WORKER1_PUBLIC_IP:51821   # terraform output worker_public_ips
+# Seul le trafic vers le subnet du tunnel passe par le VPN
+AllowedIPs          = 10.200.0.0/24
+PersistentKeepalive = 25

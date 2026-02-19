@@ -23,6 +23,10 @@ kubernetes/secrets/*.yaml
 wireguard/**/*.key
 wireguard/client-vpn/clients/
 
+# ── OpenVPN PKI (contient des clés privées) ───────────────────────────────────
+openvpn/pki/
+openvpn/**/*.ovpn
+
 # ── SSH keys ──────────────────────────────────────────────────────────────────
 *.pem
 id_rsa*

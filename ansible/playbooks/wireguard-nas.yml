@@ -1,0 +1,142 @@
+---
+# WireGuard tunnel NAS↔VPS via Freebox Ultra (wg1)
+# Le premier worker (storage=plex) agit comme serveur WireGuard.
+# La Freebox Ultra est le client WireGuard côté domicile.
+# Le NAS Synology n'est pas touché — il communique normalement via sa gateway (Freebox).
+# Subnet : 10.200.0.0/24 — worker-1 = 10.200.0.1, Freebox = 10.200.0.2
+#
+# Usage initial (sans peer Freebox) :
+#   ansible-playbook playbooks/wireguard-nas.yml
+#   → Affiche la clé publique wg1 à copier dans la config WireGuard de la Freebox.
+#
+# Après avoir configuré la Freebox avec gen-wireguard-nas.sh :
+#   ansible-playbook playbooks/wireguard-nas.yml \
+#     -e freebox_wg_pubkey=<CLÉ_PUBLIQUE_FREEBOX>
+
+- name: Configure WireGuard — NAS tunnel via Freebox (wg1)
+  hosts: workers[0]
+  become: true
+  gather_facts: true
+
+  vars:
+    wg_interface: wg1
+    wg_port: "{{ wg_nas_tunnel_port }}"
+    wg_server_address: "10.200.0.1/24"
+    wg_config_path: "/etc/wireguard/{{ wg_interface }}.conf"
+
+  tasks:
+    - name: Ensure WireGuard is installed
+      apt:
+        name: wireguard
+        state: present
+
+    - name: Ensure nfs-common is installed (client NFS côté worker)
+      apt:
+        name: nfs-common
+        state: present
+
+    - name: Generate WireGuard private key if absent
+      shell: wg genkey | tee /etc/wireguard/{{ wg_interface }}.key
+      args:
+        creates: /etc/wireguard/{{ wg_interface }}.key
+
+    - name: Secure private key file
+      file:
+        path: /etc/wireguard/{{ wg_interface }}.key
+        mode: "0600"
+
+    - name: Read private key
+      slurp:
+        src: /etc/wireguard/{{ wg_interface }}.key
+      register: wg_privkey_b64
+
+    - name: Derive public key
+      shell: echo "{{ wg_privkey_b64.content | b64decode | trim }}" | wg pubkey
+      register: wg_pubkey
+      changed_when: false
+
+    - name: Show server public key
+      debug:
+        msg: >-
+          WireGuard public key du worker-1 (wg1) : {{ wg_pubkey.stdout }}
+          — À renseigner dans SERVER_WG1_PUBKEY dans .env, puis lancer gen-wireguard-nas.sh.
+
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_file: /etc/sysctl.d/wireguard.conf
+        reload: true
+
+    - name: Write wg1 config
+      copy:
+        dest: "{{ wg_config_path }}"
+        mode: "0600"
+        content: |
+          [Interface]
+          Address    = {{ wg_server_address }}
+          PrivateKey = {{ wg_privkey_b64.content | b64decode | trim }}
+          ListenPort = {{ wg_port }}
+
+          {% if freebox_wg_pubkey is defined and freebox_wg_pubkey | length > 0 %}
+          [Peer]
+          # Freebox Ultra — gateway LAN domicile
+          PublicKey  = {{ freebox_wg_pubkey }}
+          # AllowedIPs inclut le LAN pour que le NAS soit joignable depuis le VPS
+          AllowedIPs = {{ freebox_wg_ip }}/32, {{ lan_subnet }}
+          {% else %}
+          # ── Ajouter le peer Freebox après avoir généré sa config ──
+          # Relancer le playbook avec : -e freebox_wg_pubkey=<CLÉ_FREEBOX>
+          # [Peer]
+          # # Freebox Ultra — gateway LAN domicile
+          # PublicKey  = FREEBOX_PUBLIC_KEY
+          # AllowedIPs = {{ freebox_wg_ip }}/32, {{ lan_subnet }}
+          {% endif %}
+      notify: Restart wg1
+
+    - name: Enable and start WireGuard wg1
+      systemd:
+        name: "wg-quick@{{ wg_interface }}"
+        state: started
+        enabled: true
+
+    - name: Verify tunnel is up
+      command: wg show {{ wg_interface }}
+      register: wg_status
+      changed_when: false
+
+    - name: Display tunnel status
+      debug:
+        var: wg_status.stdout_lines
+
+    - name: Check Freebox reachability via tunnel (seulement si peer configuré)
+      command: ping -c 2 -W 3 {{ freebox_wg_ip }}
+      register: freebox_ping
+      changed_when: false
+      failed_when: false
+      when: freebox_wg_pubkey is defined and freebox_wg_pubkey | length > 0
+
+    - name: Display Freebox reachability
+      debug:
+        msg: >-
+          Freebox ({{ freebox_wg_ip }}) {{ 'JOIGNABLE ✓' if freebox_ping.rc == 0 else 'NON JOIGNABLE — vérifier la config WireGuard de la Freebox' }}
+      when: freebox_wg_pubkey is defined and freebox_wg_pubkey | length > 0
+
+    - name: Check NAS reachability via LAN+tunnel (seulement si peer configuré)
+      command: ping -c 2 -W 3 {{ nas_lan_ip }}
+      register: nas_ping
+      changed_when: false
+      failed_when: false
+      when: freebox_wg_pubkey is defined and freebox_wg_pubkey | length > 0
+
+    - name: Display NAS reachability
+      debug:
+        msg: >-
+          NAS ({{ nas_lan_ip }}) {{ 'JOIGNABLE ✓ — NFS prêt' if nas_ping.rc == 0 else 'NON JOIGNABLE — vérifier IP NAS et export NFS' }}
+      when: freebox_wg_pubkey is defined and freebox_wg_pubkey | length > 0
+
+  handlers:
+    - name: Restart wg1
+      systemd:
+        name: wg-quick@wg1
+        state: restarted

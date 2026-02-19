@@ -1,0 +1,156 @@
+---
+# openvpn-nas.yml — Installe et configure le serveur OpenVPN sur worker-1.
+# Ce tunnel remplace wg1 (WireGuard) pour l'accès NAS → Plex.
+#
+# Pré-requis : avoir lancé scripts/gen-openvpn-nas.sh (génère les certs dans openvpn/pki/).
+# Lancement : ansible-playbook playbooks/openvpn-nas.yml -e @group_vars/all.yml
+#
+# Résultat :
+#   - worker-1 écoute sur UDP 1194 (interface tun0, IP 10.200.0.1)
+#   - NAS DS220j se connecte en client OpenVPN → IP 10.200.0.2 (via CCD)
+#   - NFS Plex monté depuis 10.200.0.2:/volume1/media
+
+- name: Configure OpenVPN NAS tunnel on worker-1
+  hosts: workers[0]
+  become: yes
+
+  vars:
+    openvpn_port:    "{{ openvpn_nas_port | default(1194) }}"
+    openvpn_subnet:  "10.200.0.0"
+    openvpn_mask:    "255.255.255.0"
+    nas_client_ip:   "10.200.0.2"
+    server_dir:      /etc/openvpn/server
+    pki_local:       "{{ playbook_dir }}/../../openvpn/pki"
+
+  tasks:
+
+    # ── 0. Nettoyage wg1 (ancien tunnel WireGuard NAS) ───────────────────────
+    - name: Stop wg1 if running
+      command: wg-quick down wg1
+      failed_when: false
+      changed_when: false
+
+    - name: Remove wg1 config
+      file:
+        path: /etc/wireguard/wg1.conf
+        state: absent
+
+    # ── 1. Installation OpenVPN ───────────────────────────────────────────────
+    - name: Install openvpn and nfs-common
+      apt:
+        name:
+          - openvpn
+          - nfs-common
+        state: present
+        update_cache: yes
+
+    # ── 2. Déploiement des certificats ────────────────────────────────────────
+    - name: Create OpenVPN server directory
+      file:
+        path: "{{ server_dir }}"
+        state: directory
+        mode: '0700'
+        owner: root
+        group: root
+
+    - name: Deploy CA certificate
+      copy:
+        src: "{{ pki_local }}/ca.crt"
+        dest: "{{ server_dir }}/ca.crt"
+        mode: '0644'
+
+    - name: Deploy server certificate
+      copy:
+        src: "{{ pki_local }}/server.crt"
+        dest: "{{ server_dir }}/server.crt"
+        mode: '0644'
+
+    - name: Deploy server private key
+      copy:
+        src: "{{ pki_local }}/server.key"
+        dest: "{{ server_dir }}/server.key"
+        mode: '0600'
+
+    - name: Deploy DH parameters
+      copy:
+        src: "{{ pki_local }}/dh.pem"
+        dest: "{{ server_dir }}/dh.pem"
+        mode: '0644'
+
+    # ── 3. Configuration du serveur ───────────────────────────────────────────
+    - name: Write OpenVPN server config
+      copy:
+        dest: "{{ server_dir }}/server.conf"
+        mode: '0600'
+        content: |
+          port {{ openvpn_port }}
+          proto udp
+          dev tun
+          topology subnet
+
+          server {{ openvpn_subnet }} {{ openvpn_mask }}
+          ifconfig-pool-persist /var/log/openvpn-ipp.txt
+
+          ca   {{ server_dir }}/ca.crt
+          cert {{ server_dir }}/server.crt
+          key  {{ server_dir }}/server.key
+          dh   {{ server_dir }}/dh.pem
+
+          # IP statique par client (fichier = CN du certificat)
+          client-config-dir {{ server_dir }}/ccd
+
+          keepalive 10 60
+          persist-key
+          persist-tun
+
+          status     /var/log/openvpn-status.log
+          log-append /var/log/openvpn.log
+          verb 3
+      notify: restart openvpn
+
+    - name: Create CCD directory
+      file:
+        path: "{{ server_dir }}/ccd"
+        state: directory
+        mode: '0755'
+
+    - name: Assign static IP 10.200.0.2 to NAS client
+      copy:
+        dest: "{{ server_dir }}/ccd/nas"
+        mode: '0644'
+        content: "ifconfig-push {{ nas_client_ip }} {{ openvpn_mask }}\n"
+
+    # ── 4. Réseau ─────────────────────────────────────────────────────────────
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: yes
+        state: present
+        reload: yes
+
+    # ── 5. Démarrage du service ───────────────────────────────────────────────
+    - name: Enable and start openvpn-server@server
+      systemd:
+        name: openvpn-server@server
+        enabled: yes
+        state: started
+
+    # ── 6. Vérification ───────────────────────────────────────────────────────
+    - name: Check tun0 interface is up
+      command: ip addr show tun0
+      register: tun_check
+      changed_when: false
+      retries: 5
+      delay: 3
+      until: tun_check.rc == 0
+
+    - name: Show tun0 address
+      debug:
+        msg: "tun0 OK — {{ tun_check.stdout_lines | select('search', 'inet ') | list }}"
+
+  handlers:
+    - name: restart openvpn
+      systemd:
+        name: openvpn-server@server
+        state: restarted

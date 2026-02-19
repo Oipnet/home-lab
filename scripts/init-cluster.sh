@@ -78,12 +78,28 @@ ansible_kubernetes() {
   cd "$REPO_ROOT"
 }
 
-# ── Step 4: Ansible — WireGuard ──────────────────────────────────────────────
+# ── Step 4: Ansible — WireGuard client VPN (wg0) ────────────────────────────
 ansible_wireguard() {
   check_deps ansible ansible-playbook ansible-vault
-  info "Step 4/5 — Ansible: configuring WireGuard VPNs..."
+  info "Step 4/5 — Ansible: configuring WireGuard client VPN (wg0)..."
   cd "$ANSIBLE_DIR"
   ansible-playbook playbooks/wireguard.yml \
+    --vault-password-file ~/.ansible-vault-pass \
+    -e @group_vars/all.yml \
+    -v
+  cd "$REPO_ROOT"
+}
+
+# ── Step optionnel: Ansible — OpenVPN tunnel NAS (tun0) ──────────────────────
+# Exécuter après avoir lancé gen-openvpn-nas.sh (génère les certs dans openvpn/pki/).
+#   ./scripts/init-cluster.sh openvpn-nas
+ansible_openvpn_nas() {
+  check_deps ansible ansible-playbook ansible-vault
+  [[ -f "$REPO_ROOT/openvpn/pki/ca.crt" ]] || \
+    die "Certificats OpenVPN introuvables. Lancer d'abord : ./scripts/gen-openvpn-nas.sh"
+  info "Ansible: configuring OpenVPN NAS tunnel (tun0) on worker-1..."
+  cd "$ANSIBLE_DIR"
+  ansible-playbook playbooks/openvpn-nas.yml \
     --vault-password-file ~/.ansible-vault-pass \
     -e @group_vars/all.yml \
     -v
@@ -93,14 +109,18 @@ ansible_wireguard() {
 # ── Step 5: Deploy Kubernetes workloads ─────────────────────────────────────
 deploy_workloads() {
   check_deps kubectl
-  info "Step 5/5 — Kubernetes: deploying Plex (local storage)..."
+  info "Step 5/5 — Kubernetes: deploying Plex + stockage NAS..."
   export KUBECONFIG="$REPO_ROOT/.kube/config"
 
-  # StorageClass locale (pas de provisioner externe nécessaire)
+  # StorageClasses
   kubectl apply -f "$REPO_ROOT/kubernetes/storage/local-storage-class.yaml"
+  kubectl apply -f "$REPO_ROOT/kubernetes/storage/nfs-storage-class.yaml"
 
   kubectl apply -f "$REPO_ROOT/kubernetes/namespaces/"
+
+  # PersistentVolumes : config locale + media NFS (NAS)
   kubectl apply -f "$REPO_ROOT/kubernetes/plex/persistent-volume.yaml"
+  kubectl apply -f "$REPO_ROOT/kubernetes/plex/persistent-volume-nas.yaml"
   kubectl apply -f "$REPO_ROOT/kubernetes/plex/persistent-volume-claim.yaml"
 
   warn "Créer le secret du claim token Plex avant de déployer :"
@@ -122,11 +142,12 @@ deploy_workloads() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
   case "${1:-all}" in
-    terraform)   terraform_apply ;;
-    common)      ansible_common ;;
-    kubernetes)  ansible_kubernetes ;;
-    wireguard)   ansible_wireguard ;;
-    workloads)   deploy_workloads ;;
+    terraform)      terraform_apply ;;
+    common)         ansible_common ;;
+    kubernetes)     ansible_kubernetes ;;
+    wireguard)      ansible_wireguard ;;
+    openvpn-nas)    ansible_openvpn_nas ;;
+    workloads)      deploy_workloads ;;
     all)
       terraform_apply
       ansible_common
@@ -134,9 +155,13 @@ main() {
       ansible_wireguard
       deploy_workloads
       info "Bootstrap complete!"
+      info "Étape suivante — tunnel OpenVPN NAS :"
+      info "  1. ./scripts/gen-openvpn-nas.sh"
+      info "  2. ./scripts/init-cluster.sh openvpn-nas"
+      info "  3. Importer openvpn/nas/nas.ovpn dans DSM > Réseau > Interface réseau > VPN"
       ;;
     *)
-      echo "Usage: $0 [terraform|common|kubernetes|wireguard|workloads|all]"
+      echo "Usage: $0 [terraform|common|kubernetes|wireguard|openvpn-nas|workloads|all]"
       exit 1
       ;;
   esac

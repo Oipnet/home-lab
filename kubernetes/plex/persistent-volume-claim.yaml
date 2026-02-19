@@ -17,6 +17,8 @@ spec:
       app: plex
 
 ---
+# plex-media-pvc — lie au PV NFS (persistent-volume-nas.yaml).
+# La médiathèque est hébergée sur le NAS Synology via le tunnel OpenVPN tun0.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -25,11 +27,12 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: local-storage
+  storageClassName: nfs-storage
   resources:
     requests:
-      storage: 500Gi
+      storage: 10Ti
   selector:
     matchLabels:
       volume: media
       app: plex
+      storage-type: nfs

@@ -113,6 +113,14 @@ resource "scaleway_instance_security_group" "worker" {
     ip_range = "0.0.0.0/0"
   }
 
+  # OpenVPN — tunnel NAS Synology (tun0)
+  inbound_rule {
+    action   = "accept"
+    port     = 1194
+    protocol = "UDP"
+    ip_range = "0.0.0.0/0"
+  }
+
   # Flannel VXLAN overlay
   inbound_rule {
     action   = "accept"

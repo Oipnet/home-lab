@@ -1,0 +1,39 @@
+---
+# PersistentVolume NFS pour la médiathèque Plex.
+# Le NAS Synology DS220j exporte son partage media via NFS.
+# Le trafic NFS transite par le tunnel OpenVPN tun0 (NAS ↔ worker-1).
+#
+# Pré-requis :
+#   1. Tunnel OpenVPN opérationnel (NAS joignable : ping 10.200.0.2 depuis worker-1)
+#   2. NFS activé sur le NAS (DSM > Panneau de configuration > Services de fichiers > NFS)
+#   3. Partage "media" avec autorisation NFS pour 10.200.0.1 (IP OpenVPN de worker-1) :
+#        DSM > Dossier partagé > media > Modifier > Autorisations NFS
+#        Hôte/IP : 10.200.0.1 | Privilège : Lecture/Écriture | Squash : Aucun
+#
+# Vérifier l'export NFS depuis worker-1 avant d'appliquer :
+#   showmount -e 10.200.0.2
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: plex-media-nfs-pv
+  labels:
+    app: plex
+    volume: media
+    storage-type: nfs
+spec:
+  capacity:
+    storage: 10Ti           # Capacité indicative — limitée par le stockage du NAS
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+    - rsize=131072
+    - wsize=131072
+    - timeo=600
+    - retrans=2
+  nfs:
+    server: 10.200.0.2          # IP OpenVPN du NAS Synology (tunnel tun0)
+    path: /volume1/files        # Chemin du partage NFS sur le NAS

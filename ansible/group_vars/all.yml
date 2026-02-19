@@ -10,6 +10,14 @@ service_cidr: "10.96.0.0/12"
 wg_plex_vpn_port: 51820
 wg_plex_vpn_cidr: "10.201.0.0/24"
 
+# OpenVPN — tunnel NAS Synology DS220j (tun0, sur worker-1)
+# Le NAS se connecte directement en client OpenVPN (client DSM natif, sans Docker).
+openvpn_nas_port: 1194
+openvpn_nas_subnet: "10.200.0.0/24"
+openvpn_nas_server_ip: "10.200.0.1"   # IP OpenVPN de worker-1
+openvpn_nas_client_ip: "10.200.0.2"   # IP OpenVPN du NAS (statique via CCD)
+nas_nfs_path: "/volume1/files"          # Chemin du partage NFS sur le NAS
+
 # Stockage Plex sur le nœud dédié
 plex_data_path: "/data/plex"
 plex_worker_label: "storage=plex"

@@ -3,4 +3,5 @@
 - import_playbook: common.yml
 - import_playbook: kubernetes.yml
 - import_playbook: wireguard.yml
-# NAS integration: ajouter ici quand le NAS sera prêt
+# Tunnel NAS : exécuter séparément (voir wireguard-nas.yml et scripts/gen-wireguard-nas.sh)
+# - import_playbook: wireguard-nas.yml
