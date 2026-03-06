@@ -18,6 +18,9 @@ ansible/inventory/hosts.ini          # generated from Terraform output
 .kube/
 kubernetes/secrets/*.yaml
 !kubernetes/secrets/*.yaml.example
+# SOPS : on commite uniquement les fichiers chiffrés (*.enc.yaml)
+kubernetes/**/*secret*.yaml
+!kubernetes/**/*secret*.enc.yaml
 
 # ── OpenVPN PKI (contient des clés privées) ───────────────────────────────────
 openvpn/pki/

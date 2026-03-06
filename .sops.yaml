@@ -1,0 +1,3 @@
+creation_rules:
+  - path_regex: kubernetes/.*secret.*\.yaml$
+    age: age1s34wy4nl56s4at7u63y7djms0629x65ddqtvvk2v97q05nza4g0shzyfjm
