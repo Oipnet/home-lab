@@ -19,13 +19,13 @@ ansible/inventory/hosts.ini          # generated from Terraform output
 kubernetes/secrets/*.yaml
 !kubernetes/secrets/*.yaml.example
 
-# ── WireGuard keys ────────────────────────────────────────────────────────────
-wireguard/**/*.key
-wireguard/client-vpn/clients/
-
 # ── OpenVPN PKI (contient des clés privées) ───────────────────────────────────
 openvpn/pki/
 openvpn/**/*.ovpn
+
+# ── WireGuard (contient des clés privées) ─────────────────────────────────────
+wireguard/**/*.conf
+!wireguard/**/*.conf.example
 
 # ── SSH keys ──────────────────────────────────────────────────────────────────
 *.pem

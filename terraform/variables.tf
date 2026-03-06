@@ -39,8 +39,8 @@ variable "control_plane_type" {
   default     = "DEV1-S" # 2 vCPU, 2 GB RAM
 }
 
-variable "plex_worker_type" {
-  description = "Instance type for worker-1 (Plex + stockage local)"
+variable "media_worker_type" {
+  description = "Instance type for worker-1 (Jellyfin + stockage local)"
   type        = string
   default     = "DEV1-M" # 3 vCPU, 4 GB RAM
 }
@@ -64,20 +64,9 @@ variable "ssh_public_key_path" {
 }
 
 # Networking
-variable "plex_wireguard_cidr" {
-  description = "WireGuard subnet for external Plex access VPN (wg1)"
-  type        = string
-  default     = "10.201.0.0/24"
-}
-
 variable "allowed_ssh_cidrs" {
   description = "CIDRs allowed to SSH into nodes"
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
 
-variable "plex_data_path" {
-  description = "Absolute path on the plex worker node for persistent storage"
-  type        = string
-  default     = "/data/plex"
-}

@@ -1,0 +1,31 @@
+---
+# Stockage NFS — médias sur le NAS Synology DS220j.
+# Accès via le tunnel OpenVPN (tun0 sur worker-1) : NAS IP = 10.200.0.2.
+# Le tunnel openvpn-nas doit être actif sur worker-1 avant de monter ce PV.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jellyfin-media-nfs-pv
+  labels:
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/part-of: homelab
+    volume: media
+    app: jellyfin
+    storage-type: nfs
+spec:
+  capacity:
+    storage: 10Ti
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+    - rsize=131072
+    - wsize=131072
+    - timeo=600
+    - retrans=2
+  nfs:
+    server: 10.200.0.2
+    path: /volume1/files

@@ -1,0 +1,29 @@
+---
+# Stockage local pour la configuration Jellyfin (base de données, métadonnées, etc.)
+# Réside sur worker-1 (nœud labellisé storage=plex) dans /data/jellyfin/config.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jellyfin-config-pv
+  labels:
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/part-of: homelab
+    volume: config
+    app: jellyfin
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /data/jellyfin/config
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: storage
+              operator: In
+              values:
+                - plex

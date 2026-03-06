@@ -1,0 +1,204 @@
+---
+# WireGuard VPN — accès sécurisé (wg0, sur worker-2)
+#
+# Ce playbook configure worker-2 comme serveur WireGuard pour :
+#   - Un tunnel site-to-site avec la Freebox Ultra (10.200.0.0/24)
+#   - Des clients utilisateurs individuels (10.201.0.0/24)
+#
+# Lancement unique — génère les clés VPS + Freebox et affiche la config Freebox :
+#   ansible-playbook -i inventory/hosts.ini playbooks/wireguard-vpn.yml \
+#     -e @inventory/group_vars/all.yml
+#
+# Relancer après avoir activé WireGuard sur la Freebox (pour valider le tunnel) :
+#   ansible-playbook -i inventory/hosts.ini playbooks/wireguard-vpn.yml \
+#     -e @inventory/group_vars/all.yml
+
+- name: Configure WireGuard VPN — accès sécurisé Jellyfin (wg0)
+  hosts: worker-2
+  become: true
+  gather_facts: true
+
+  vars:
+    wg_interface: "{{ wg_vpn_interface }}"
+    wg_port: "{{ wg_vpn_port }}"
+    wg_server_address: "{{ wg_vpn_server_address }}"
+    wg_config_path: "/etc/wireguard/{{ wg_interface }}.conf"
+    wg_keys_dir: "/etc/wireguard"
+
+  tasks:
+    # ── Prérequis ─────────────────────────────────────────────────────────────
+    - name: Ensure WireGuard and qrencode are installed
+      apt:
+        name:
+          - wireguard
+          - wireguard-tools
+          - qrencode
+        state: present
+        update_cache: false
+
+    - name: Ensure /etc/wireguard has correct permissions
+      file:
+        path: "{{ wg_keys_dir }}"
+        state: directory
+        mode: "0700"
+
+    # ── Clés VPS ──────────────────────────────────────────────────────────────
+    - name: Generate VPS private key if absent
+      shell: wg genkey > {{ wg_keys_dir }}/{{ wg_interface }}.key
+      args:
+        creates: "{{ wg_keys_dir }}/{{ wg_interface }}.key"
+
+    - name: Secure VPS private key
+      file:
+        path: "{{ wg_keys_dir }}/{{ wg_interface }}.key"
+        mode: "0600"
+
+    - name: Read VPS private key
+      slurp:
+        src: "{{ wg_keys_dir }}/{{ wg_interface }}.key"
+      register: wg_privkey_b64
+
+    - name: Derive VPS public key
+      shell: echo "{{ wg_privkey_b64.content | b64decode | trim }}" | wg pubkey
+      register: wg_pubkey
+      changed_when: false
+
+    - name: Save VPS public key to file
+      copy:
+        content: "{{ wg_pubkey.stdout }}"
+        dest: "{{ wg_keys_dir }}/{{ wg_interface }}.pub"
+        mode: "0644"
+
+    # ── Clés Freebox (générées sur le VPS, à importer sur la Freebox) ─────────
+    - name: Generate Freebox private key if absent
+      shell: wg genkey > {{ wg_keys_dir }}/freebox.key
+      args:
+        creates: "{{ wg_keys_dir }}/freebox.key"
+
+    - name: Secure Freebox private key
+      file:
+        path: "{{ wg_keys_dir }}/freebox.key"
+        mode: "0600"
+
+    - name: Read Freebox private key
+      slurp:
+        src: "{{ wg_keys_dir }}/freebox.key"
+      register: freebox_privkey_b64
+
+    - name: Derive Freebox public key
+      shell: echo "{{ freebox_privkey_b64.content | b64decode | trim }}" | wg pubkey
+      register: freebox_pubkey
+      changed_when: false
+
+    - name: Save Freebox public key to file
+      copy:
+        content: "{{ freebox_pubkey.stdout }}"
+        dest: "{{ wg_keys_dir }}/freebox.pub"
+        mode: "0644"
+
+    # ── ip_forward ────────────────────────────────────────────────────────────
+    - name: Enable IP forwarding persistently
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_file: /etc/sysctl.d/99-wireguard.conf
+        reload: true
+
+    # ── Configuration wg0 (VPS) ───────────────────────────────────────────────
+    - name: Write wg0 configuration
+      copy:
+        dest: "{{ wg_config_path }}"
+        mode: "0600"
+        content: |
+          [Interface]
+          Address    = {{ wg_server_address }}
+          ListenPort = {{ wg_port }}
+          PrivateKey = {{ wg_privkey_b64.content | b64decode | trim }}
+
+          PostUp   = iptables -A FORWARD -i %i -j ACCEPT
+          PostUp   = iptables -A FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT
+          PostDown = iptables -D FORWARD -i %i -j ACCEPT
+          PostDown = iptables -D FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+          # ─── Peer : Freebox Ultra (site-to-site) ──────────────────────────
+          [Peer]
+          PublicKey  = {{ freebox_wg_pubkey | default(freebox_pubkey.stdout) }}
+          AllowedIPs = {{ wg_vpn_freebox_ip }}/32, {{ lan_subnet }}
+      notify: Restart wg0
+
+    # ── Fichier de configuration Freebox (à importer dans Freebox OS) ─────────
+    - name: Write Freebox WireGuard config file
+      copy:
+        dest: "{{ wg_keys_dir }}/freebox-wg0.conf"
+        mode: "0600"
+        content: |
+          [Interface]
+          Address    = {{ wg_vpn_freebox_ip }}/24
+          PrivateKey = {{ freebox_privkey_b64.content | b64decode | trim }}
+
+          [Peer]
+          # VPS worker-2
+          PublicKey           = {{ wg_pubkey.stdout }}
+          Endpoint            = 163.172.181.187:{{ wg_port }}
+          AllowedIPs          = {{ wg_vpn_server_address | regex_replace('/\d+$', '/32') }}, {{ wg_vpn_users_subnet }}
+          PersistentKeepalive = 25
+
+    - name: Read Freebox config for display
+      slurp:
+        src: "{{ wg_keys_dir }}/freebox-wg0.conf"
+      register: freebox_conf_b64
+
+    - name: Show Freebox WireGuard configuration
+      debug:
+        msg: |
+          ══════════════════════════════════════════════════════
+          Configuration WireGuard Freebox Ultra
+          → Fichier sur le VPS : /etc/wireguard/freebox-wg0.conf
+          → Copier dans Freebox OS : Paramètres → VPN → WireGuard
+
+          {{ freebox_conf_b64.content | b64decode }}
+          ══════════════════════════════════════════════════════
+
+    # ── Rapatrier les configs générées en local ───────────────────────────────
+    - name: Fetch Freebox config to local wireguard/freebox/
+      fetch:
+        src: "{{ wg_keys_dir }}/freebox-wg0.conf"
+        dest: "{{ playbook_dir }}/../../wireguard/freebox/freebox-wg0.conf"
+        flat: true
+
+    # ── Démarrage ─────────────────────────────────────────────────────────────
+    - name: Enable and start WireGuard wg0
+      systemd:
+        name: "wg-quick@{{ wg_interface }}"
+        state: started
+        enabled: true
+
+    # ── Vérification ──────────────────────────────────────────────────────────
+    - name: Show wg0 status
+      command: wg show {{ wg_interface }}
+      register: wg_status
+      changed_when: false
+
+    - name: Display wg0 status
+      debug:
+        var: wg_status.stdout_lines
+
+    # ── Test ping Freebox via tunnel ──────────────────────────────────────────
+    - name: Test reachability Freebox via tunnel
+      command: ping -c 2 -W 3 {{ wg_vpn_freebox_ip }}
+      register: freebox_ping
+      changed_when: false
+      failed_when: false
+
+    - name: Display Freebox reachability
+      debug:
+        msg: >-
+          Freebox ({{ wg_vpn_freebox_ip }}) :
+          {{ 'JOIGNABLE ✓ — tunnel site-to-site opérationnel' if freebox_ping.rc == 0
+             else 'NON JOIGNABLE — normal si Freebox pas encore configurée' }}
+
+  handlers:
+    - name: Restart wg0
+      systemd:
+        name: "wg-quick@{{ wg_interface }}"
+        state: restarted

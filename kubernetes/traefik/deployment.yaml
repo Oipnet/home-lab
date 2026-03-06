@@ -38,6 +38,7 @@ spec:
             # Providers
             - --providers.kubernetesingress=true
             - --providers.kubernetesingress.ingressclass=traefik
+            - --providers.kubernetescrd=true
 
             # Entrypoints
             - --entrypoints.web.address=:80

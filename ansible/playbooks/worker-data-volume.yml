@@ -1,0 +1,162 @@
+---
+# worker-data-volume.yml — Formate et monte le volume bloc Scaleway sur worker-1.
+#
+# Ce playbook gère la migration de /data (sur le disque racine) vers un volume
+# b_ssd de 20 Go attaché via Terraform.
+#
+# Pré-requis :
+#   - Le volume bloc doit être attaché via Terraform (scaleway_instance_volume)
+#   - Le device est détecté automatiquement (premier disque non formaté/non monté)
+#
+# Lancement :
+#   ansible-playbook -i inventory/hosts.ini playbooks/worker-data-volume.yml
+#
+# Résultat :
+#   - /dev/sdb (ou vdb) formaté ext4
+#   - /data monté sur le nouveau volume (fstab persistant)
+#   - Données existantes de /data copiées sur le nouveau volume
+
+# ── 1. Scale down Jellyfin (évite corruption pendant la migration) ─────────────
+- name: Scale down Jellyfin before volume migration
+  hosts: control_plane
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Scale Jellyfin deployment to 0
+      command: kubectl scale deployment/jellyfin -n jellyfin --replicas=0
+      changed_when: true
+
+    - name: Wait for Jellyfin pod to terminate
+      command: >
+        kubectl wait --for=delete pod
+        -l app=jellyfin -n jellyfin
+        --timeout=120s
+      failed_when: false
+      changed_when: false
+
+# ── 2. Formatage et migration des données sur worker-1 ────────────────────────
+- name: Format and mount data volume on worker-1
+  hosts: workers[0]
+  become: yes
+
+  vars:
+    data_device: "{{ data_block_device | default('/dev/sdb') }}"
+    data_mount: "/data"
+    temp_mount: "/mnt/data-new"
+    fs_type: "ext4"
+
+  tasks:
+    # ── Détection du device ────────────────────────────────────────────────────
+    - name: Check device exists
+      stat:
+        path: "{{ data_device }}"
+      register: device_stat
+
+    - name: Fail if device not found
+      fail:
+        msg: >
+          Device {{ data_device }} not found.
+          Pass -e data_block_device=/dev/vdb if needed.
+          Run 'lsblk' on worker-1 to find the correct device name.
+      when: not device_stat.stat.exists
+
+    - name: Get device filesystem type
+      command: blkid -s TYPE -o value {{ data_device }}
+      register: blkid_type
+      changed_when: false
+      failed_when: false
+
+    # ── Formatage (si pas encore formaté) ─────────────────────────────────────
+    - name: Format device with ext4
+      command: mkfs.ext4 -L data {{ data_device }}
+      when: blkid_type.stdout == ""
+
+    # ── Montage temporaire et copie des données ────────────────────────────────
+    - name: Create temp mount point
+      file:
+        path: "{{ temp_mount }}"
+        state: directory
+        mode: '0755'
+
+    - name: Mount new volume at temp path
+      mount:
+        path: "{{ temp_mount }}"
+        src: "{{ data_device }}"
+        fstype: "{{ fs_type }}"
+        state: mounted
+
+    - name: Sync /data to new volume (preserve all attributes)
+      command: >
+        rsync -aAX --delete
+        {{ data_mount }}/
+        {{ temp_mount }}/
+      register: rsync_result
+      changed_when: rsync_result.rc == 0
+
+    # ── Pivot : montage du nouveau volume sur /data ────────────────────────────
+    - name: Unmount temp path
+      mount:
+        path: "{{ temp_mount }}"
+        state: unmounted
+
+    - name: Get device UUID
+      command: blkid -s UUID -o value {{ data_device }}
+      register: device_uuid
+      changed_when: false
+
+    - name: Add /data entry to fstab
+      mount:
+        path: "{{ data_mount }}"
+        src: "UUID={{ device_uuid.stdout }}"
+        fstype: "{{ fs_type }}"
+        opts: defaults,noatime
+        state: present
+
+    - name: Mount /data from fstab
+      command: mount {{ data_mount }}
+      register: mount_result
+      failed_when: mount_result.rc != 0 and 'already mounted' not in mount_result.stderr
+      changed_when: mount_result.rc == 0
+
+    - name: Verify /data mount
+      command: df -h {{ data_mount }}
+      register: df_result
+      changed_when: false
+
+    - name: Show /data mount info
+      debug:
+        msg: "{{ df_result.stdout_lines }}"
+
+    - name: Cleanup temp mount point
+      file:
+        path: "{{ temp_mount }}"
+        state: absent
+
+# ── 3. Scale up Jellyfin ──────────────────────────────────────────────────────
+- name: Scale up Jellyfin after volume migration
+  hosts: control_plane
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Scale Jellyfin deployment back to 1
+      command: kubectl scale deployment/jellyfin -n jellyfin --replicas=1
+      changed_when: true
+
+    - name: Wait for Jellyfin pod to be ready
+      command: >
+        kubectl wait --for=condition=ready pod
+        -l app=jellyfin -n jellyfin
+        --timeout=180s
+      register: wait_result
+      changed_when: false
+
+    - name: Show Jellyfin pod status
+      command: kubectl get pods -n jellyfin
+      register: pod_status
+      changed_when: false
+
+    - name: Print pod status
+      debug:
+        msg: "{{ pod_status.stdout_lines }}"

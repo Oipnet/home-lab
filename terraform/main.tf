@@ -57,14 +57,6 @@ resource "scaleway_instance_security_group" "control_plane" {
     ip_range   = "0.0.0.0/0"
   }
 
-  # WireGuard — Plex client VPN (wg1)
-  inbound_rule {
-    action   = "accept"
-    port     = 51820
-    protocol = "UDP"
-    ip_range = "0.0.0.0/0"
-  }
-
   # Flannel VXLAN overlay
   inbound_rule {
     action   = "accept"
@@ -121,6 +113,14 @@ resource "scaleway_instance_security_group" "worker" {
     ip_range = "0.0.0.0/0"
   }
 
+  # WireGuard VPN — accès sécurisé Jellyfin (wg0, worker-2)
+  inbound_rule {
+    action   = "accept"
+    port     = 51820
+    protocol = "UDP"
+    ip_range = "0.0.0.0/0"
+  }
+
   # Flannel VXLAN overlay
   inbound_rule {
     action   = "accept"
@@ -160,20 +160,33 @@ resource "scaleway_instance_server" "control_plane" {
 }
 
 # ─────────────────────────────────────────────
+# Block Volume — stockage données worker-1
+# ─────────────────────────────────────────────
+resource "scaleway_block_volume" "worker1_data" {
+  name       = "${var.project_name}-worker1-data"
+  iops       = 5000
+  size_in_gb = 20
+  zone       = var.zone
+}
+
+# ─────────────────────────────────────────────
 # Worker Nodes
 # ─────────────────────────────────────────────
 resource "scaleway_instance_server" "worker" {
   count = var.worker_count
 
   name = "${var.project_name}-worker-${count.index + 1}"
-  # worker-1 (index 0) = Plex + stockage local → DEV1-M
+  # worker-1 (index 0) = Jellyfin + stockage local → DEV1-M
   # worker-2+ (index 1+) = workloads légers → DEV1-S
-  type  = count.index == 0 ? var.plex_worker_type : var.worker_type
+  type  = count.index == 0 ? var.media_worker_type : var.worker_type
   image = var.image
   zone  = var.zone
   ip_id = scaleway_instance_ip.worker[count.index].id
 
   security_group_id = scaleway_instance_security_group.worker.id
+
+  # Volume de données supplémentaire sur worker-1 uniquement
+  additional_volume_ids = count.index == 0 ? [scaleway_block_volume.worker1_data.id] : []
 
   private_network {
     pn_id = scaleway_vpc_private_network.k8s.id

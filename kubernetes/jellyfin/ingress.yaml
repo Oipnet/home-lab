@@ -2,10 +2,10 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: plex
-  namespace: plex
+  name: jellyfin
+  namespace: jellyfin
   labels:
-    app.kubernetes.io/name: plex
+    app.kubernetes.io/name: jellyfin
     app.kubernetes.io/part-of: homelab
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
@@ -14,17 +14,17 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: plex.forelse.fr
+    - host: jellyfin.forelse.fr
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: plex
+                name: jellyfin
                 port:
-                  name: plex-web
+                  name: jellyfin-http
   tls:
     - hosts:
-        - plex.forelse.fr
-      secretName: plex-tls
+        - jellyfin.forelse.fr
+      # Pas de secretName : Traefik gère le certificat via ACME (acme.json sur le PV)

@@ -1,0 +1,16 @@
+# Configuration WireGuard Freebox Ultra — site-to-site VPS
+# Généré par : ansible-playbook playbooks/wireguard-vpn.yml
+# Fichier réel (avec clé privée) : wireguard/freebox/freebox-wg0.conf (gitignored)
+#
+# Import dans Freebox OS : Paramètres → VPN → WireGuard → Importer
+
+[Interface]
+Address    = 10.200.0.2/24
+PrivateKey = <FREEBOX_PRIVATE_KEY>
+
+[Peer]
+# VPS worker-2 (163.172.181.187)
+PublicKey           = <VPS_PUBLIC_KEY>
+Endpoint            = 163.172.181.187:51820
+AllowedIPs          = 10.200.0.1/32, 10.201.0.0/24
+PersistentKeepalive = 25

@@ -1,0 +1,30 @@
+---
+# Non-sensitive defaults shared across all hosts.
+# Sensitive values (keys, passwords) go in group_vars/all/vault.yml (ansible-vault).
+
+k8s_version: "1.29"
+pod_cidr: "10.244.0.0/16"
+service_cidr: "10.96.0.0/12"
+
+# OpenVPN — tunnel NAS Synology DS220j (tun0, sur worker-1)
+# Le NAS se connecte directement en client OpenVPN (client DSM natif, sans Docker).
+openvpn_nas_port: 1194
+openvpn_nas_subnet: "10.200.0.0/24"
+openvpn_nas_server_ip: "10.200.0.1"   # IP OpenVPN de worker-1
+openvpn_nas_client_ip: "10.200.0.2"   # IP OpenVPN du NAS (statique via CCD)
+nas_nfs_path: "/volume1/files"          # Chemin du partage NFS sur le NAS
+
+# Stockage Jellyfin sur le nœud dédié (worker-1, label storage=plex)
+jellyfin_data_path: "/data/jellyfin"
+jellyfin_worker_label: "storage=plex"
+
+# WireGuard VPN — accès sécurisé Jellyfin (wg0, sur worker-2)
+# Peer Freebox : tunnel site-to-site LAN maison ↔ VPS
+# Peers utilisateurs : un peer par client (10.201.0.x)
+wg_vpn_interface: "wg0"
+wg_vpn_port: 51820
+wg_vpn_server_address: "10.200.0.1/16"   # /16 couvre 10.200.x et 10.201.x
+wg_vpn_freebox_ip: "10.200.0.2"
+wg_vpn_site_subnet: "10.200.0.0/24"      # Tunnel site-to-site
+wg_vpn_users_subnet: "10.201.0.0/24"     # Clients utilisateurs
+lan_subnet: "192.168.1.0/24"             # LAN maison (Freebox)
