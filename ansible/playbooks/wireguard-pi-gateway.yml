@@ -1,0 +1,151 @@
+---
+# WireGuard — Pi comme gateway VPN local
+#
+# Le Pi fait du DNAT : jellyfin.forelse.fr résout vers 192.168.1.3 (Pi LAN),
+# le Pi redirige le port 443 vers 10.200.0.1 (worker-2) via le tunnel WireGuard.
+# Aucune route spéciale nécessaire sur les appareils clients.
+#
+# Architecture :
+#   Client LAN → DNS: jellyfin.forelse.fr → 192.168.1.3
+#              → TCP:443 → Pi eth0
+#              → DNAT → 10.200.0.1:443 via wg0
+#              → Traefik → Jellyfin
+#
+# Prérequis :
+#   - WireGuard déjà configuré sur worker-2 (wireguard-vpn.yml déjà exécuté)
+#
+# Usage :
+#   ansible-playbook -i inventory/hosts.ini playbooks/wireguard-pi-gateway.yml \
+#     -e @inventory/group_vars/all.yml
+
+# ─── Play 1 : configurer le Pi comme client WireGuard ─────────────────────────
+- name: Configure Raspberry Pi as WireGuard gateway
+  hosts: raspberry_pi
+  become: true
+  gather_facts: true
+
+  vars:
+    wg_interface: wg0
+    wg_pi_address: "{{ wg_vpn_pi_ip }}/24"
+    wg_server_pubkey: "9kUZes4UvLCzYplEZj8AuV1nPc7gVcc/LdL/XYHYiEI="
+    wg_server_endpoint: "163.172.181.187:51820"
+
+  tasks:
+    - name: Install WireGuard and iptables
+      apt:
+        name:
+          - wireguard
+          - wireguard-tools
+          - iptables
+        state: present
+        update_cache: true
+
+    - name: Ensure /etc/wireguard has correct permissions
+      file:
+        path: /etc/wireguard
+        state: directory
+        mode: "0700"
+
+    - name: Generate Pi private key if absent
+      shell: wg genkey > /etc/wireguard/{{ wg_interface }}.key
+      args:
+        creates: /etc/wireguard/{{ wg_interface }}.key
+
+    - name: Secure private key
+      file:
+        path: /etc/wireguard/{{ wg_interface }}.key
+        mode: "0600"
+
+    - name: Read Pi private key
+      slurp:
+        src: /etc/wireguard/{{ wg_interface }}.key
+      register: pi_privkey_b64
+
+    - name: Derive Pi public key
+      shell: echo "{{ pi_privkey_b64.content | b64decode | trim }}" | wg pubkey
+      register: pi_pubkey
+      changed_when: false
+
+    - name: Save Pi public key
+      copy:
+        content: "{{ pi_pubkey.stdout }}"
+        dest: /etc/wireguard/{{ wg_interface }}.pub
+        mode: "0644"
+
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_file: /etc/sysctl.d/99-wireguard.conf
+        reload: true
+
+    - name: Write wg0 client config
+      copy:
+        dest: /etc/wireguard/{{ wg_interface }}.conf
+        mode: "0600"
+        content: |
+          [Interface]
+          Address    = {{ wg_pi_address }}
+          PrivateKey = {{ pi_privkey_b64.content | b64decode | trim }}
+
+          # DNAT : redirige jellyfin.forelse.fr (192.168.1.3:443) → 10.200.0.1:443
+          PostUp   = /usr/sbin/iptables -t nat -A PREROUTING -i eth0 -d 192.168.1.3 -p tcp --dport 443 -j DNAT --to-destination 10.200.0.1:443
+          PostUp   = /usr/sbin/iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
+          PostUp   = /usr/sbin/iptables -A FORWARD -i eth0 -o wg0 -p tcp --dport 443 -j ACCEPT
+          PostUp   = /usr/sbin/iptables -A FORWARD -i wg0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+          PostDown = /usr/sbin/iptables -t nat -D PREROUTING -i eth0 -d 192.168.1.3 -p tcp --dport 443 -j DNAT --to-destination 10.200.0.1:443
+          PostDown = /usr/sbin/iptables -t nat -D POSTROUTING -o wg0 -j MASQUERADE
+          PostDown = /usr/sbin/iptables -D FORWARD -i eth0 -o wg0 -p tcp --dport 443 -j ACCEPT
+          PostDown = /usr/sbin/iptables -D FORWARD -i wg0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+          [Peer]
+          PublicKey           = {{ wg_server_pubkey }}
+          Endpoint            = {{ wg_server_endpoint }}
+          AllowedIPs          = 10.200.0.0/24
+          PersistentKeepalive = 25
+      notify: Restart wg0
+
+    - name: Enable and start wg0
+      systemd:
+        name: wg-quick@{{ wg_interface }}
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Restart wg0
+      systemd:
+        name: wg-quick@wg0
+        state: restarted
+
+# ─── Play 2 : mettre à jour worker-2 avec le peer Pi ──────────────────────────
+- name: Update worker-2 WireGuard — replace Freebox peer with Pi
+  hosts: worker-2
+  become: true
+  gather_facts: false
+
+  vars:
+    wg_interface: wg0
+    freebox_pubkey: "RCrrBB9KPya0OCx5e02iVSrHFWZjyZ+ZlAhci8HBxVA="
+
+  tasks:
+    - name: Get Pi public key from Play 1
+      set_fact:
+        pi_pubkey: "{{ hostvars['homelab-pi']['pi_pubkey']['stdout'] }}"
+
+    - name: Remove Freebox peer from wg0
+      command: wg set {{ wg_interface }} peer {{ freebox_pubkey }} remove
+      failed_when: false
+      changed_when: true
+
+    - name: Add Pi as WireGuard peer
+      command: >
+        wg set {{ wg_interface }}
+        peer {{ pi_pubkey }}
+        allowed-ips {{ wg_vpn_pi_ip }}/32,{{ lan_subnet }}
+        persistent-keepalive 25
+      changed_when: true
+
+    - name: Persist wg0 config
+      command: wg-quick save {{ wg_interface }}
+      changed_when: true

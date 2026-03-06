@@ -1,0 +1,13 @@
+---
+# Middleware Traefik : restreint l'accès aux IPs VPN WireGuard uniquement.
+# À appliquer sur les ingress qui ne doivent pas être accessibles publiquement.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: vpn-only
+  namespace: jellyfin
+spec:
+  ipAllowList:
+    sourceRange:
+      - 10.200.0.0/16   # WireGuard VPN (site-to-site + peers utilisateurs)
+      - 192.168.1.0/24  # LAN local (si Freebox route sans NAT)

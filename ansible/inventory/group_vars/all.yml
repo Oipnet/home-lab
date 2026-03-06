@@ -19,12 +19,11 @@ jellyfin_data_path: "/data/jellyfin"
 jellyfin_worker_label: "storage=plex"
 
 # WireGuard VPN — accès sécurisé Jellyfin (wg0, sur worker-2)
-# Peer Freebox : tunnel site-to-site LAN maison ↔ VPS
-# Peers utilisateurs : un peer par client (10.201.0.x)
+# Le Raspberry Pi (192.168.1.3) est le gateway VPN local côté LAN.
 wg_vpn_interface: "wg0"
 wg_vpn_port: 51820
 wg_vpn_server_address: "10.200.0.1/16"   # /16 couvre 10.200.x et 10.201.x
-wg_vpn_freebox_ip: "10.200.0.2"
-wg_vpn_site_subnet: "10.200.0.0/24"      # Tunnel site-to-site
-wg_vpn_users_subnet: "10.201.0.0/24"     # Clients utilisateurs
-lan_subnet: "192.168.1.0/24"             # LAN maison (Freebox)
+wg_vpn_pi_ip: "10.200.0.3"              # IP WireGuard du Pi dans le tunnel
+wg_vpn_subnet: "10.200.0.0/24"          # Subnet du tunnel VPN
+wg_vpn_users_subnet: "10.201.0.0/24"    # Clients utilisateurs (mobile, etc.)
+lan_subnet: "192.168.1.0/24"            # LAN maison (Freebox)

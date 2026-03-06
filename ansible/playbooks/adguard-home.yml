@@ -1,0 +1,56 @@
+---
+- name: Install AdGuard Home on Raspberry Pi
+  hosts: raspberry_pi
+  become: true
+  gather_facts: true
+
+  vars:
+    adguard_version: "v0.107.57"
+    adguard_install_dir: /opt/AdGuardHome
+    adguard_arch: "arm64"  # Pi 4 64-bit
+
+  tasks:
+    - name: Create install directory
+      file:
+        path: "{{ adguard_install_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download AdGuard Home
+      get_url:
+        url: "https://github.com/AdguardTeam/AdGuardHome/releases/download/{{ adguard_version }}/AdGuardHome_linux_{{ adguard_arch }}.tar.gz"
+        dest: "/tmp/AdGuardHome.tar.gz"
+        mode: "0644"
+
+    - name: Extract AdGuard Home
+      unarchive:
+        src: "/tmp/AdGuardHome.tar.gz"
+        dest: "/tmp"
+        remote_src: true
+
+    - name: Copy binary to install dir
+      copy:
+        src: "/tmp/AdGuardHome/AdGuardHome"
+        dest: "{{ adguard_install_dir }}/AdGuardHome"
+        mode: "0755"
+        remote_src: true
+
+    - name: Install AdGuard Home as systemd service
+      command: "{{ adguard_install_dir }}/AdGuardHome -s install"
+      args:
+        creates: /etc/systemd/system/AdGuardHome.service
+
+    - name: Enable and start AdGuard Home
+      systemd:
+        name: AdGuardHome
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Clean up temp files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/AdGuardHome.tar.gz
+        - /tmp/AdGuardHome

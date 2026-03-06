@@ -1,0 +1,39 @@
+---
+# Configure les DNS rewrites dans AdGuard Home via son API REST.
+# Les domaines listés seront résolus vers l'IP WireGuard de worker-2 (10.200.0.1)
+# afin que le trafic parte dans le tunnel VPN depuis le réseau local.
+#
+# Prérequis : AdGuard Home doit être installé et configuré (playbook adguard-home.yml).
+#
+# Usage :
+#   ansible-playbook -i inventory/hosts.ini playbooks/adguard-dns-rewrite.yml \
+#     -e adguard_password=<mot_de_passe_admin>
+
+- name: Configure AdGuard Home DNS rewrites
+  hosts: raspberry_pi
+  gather_facts: false
+
+  vars:
+    adguard_url: "http://192.168.1.3"
+    adguard_user: "admin"
+    # Passer via -e adguard_password=xxx ou stocker dans vault
+    dns_rewrites:
+      - domain: "jellyfin.forelse.fr"
+        answer: "192.168.1.3"  # Pi fait DNAT vers 10.200.0.1 via tunnel WireGuard
+
+  tasks:
+    - name: Add DNS rewrite entries
+      uri:
+        url: "{{ adguard_url }}/control/rewrite/add"
+        method: POST
+        user: "{{ adguard_user }}"
+        password: "{{ adguard_password }}"
+        force_basic_auth: true
+        body_format: json
+        body:
+          domain: "{{ item.domain }}"
+          answer: "{{ item.answer }}"
+        status_code: [200, 201]
+      loop: "{{ dns_rewrites }}"
+      loop_control:
+        label: "{{ item.domain }} → {{ item.answer }}"

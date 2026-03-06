@@ -41,32 +41,48 @@ resource "scaleway_instance_security_group" "control_plane" {
     ip_range = "0.0.0.0/0"
   }
 
-  # etcd peer
-  inbound_rule {
-    action     = "accept"
-    port_range = "2379-2380"
-    protocol   = "TCP"
-    ip_range   = "0.0.0.0/0"
+  # etcd peer, kubelet, kube-scheduler, kube-controller-manager, Flannel VXLAN
+  # Restreint aux IPs des nœuds du cluster uniquement
+  dynamic "inbound_rule" {
+    for_each = concat(
+      [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
+      [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    )
+    content {
+      action     = "accept"
+      port_range = "2379-2380"
+      protocol   = "TCP"
+      ip_range   = inbound_rule.value
+    }
   }
 
-  # kubelet, kube-scheduler, kube-controller-manager
-  inbound_rule {
-    action     = "accept"
-    port_range = "10250-10259"
-    protocol   = "TCP"
-    ip_range   = "0.0.0.0/0"
+  dynamic "inbound_rule" {
+    for_each = concat(
+      [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
+      [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    )
+    content {
+      action     = "accept"
+      port_range = "10250-10259"
+      protocol   = "TCP"
+      ip_range   = inbound_rule.value
+    }
   }
 
-  # Flannel VXLAN overlay
-  inbound_rule {
-    action   = "accept"
-    port     = 8472
-    protocol = "UDP"
-    ip_range = "0.0.0.0/0"
+  dynamic "inbound_rule" {
+    for_each = concat(
+      [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
+      [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    )
+    content {
+      action   = "accept"
+      port     = 8472
+      protocol = "UDP"
+      ip_range = inbound_rule.value
+    }
   }
 
   # Beszel agent — le Hub (sur worker-1) se connecte aux agents sur ce port
-  # Restreint aux IPs des nœuds du cluster uniquement
   dynamic "inbound_rule" {
     for_each = concat(
       [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
@@ -112,15 +128,7 @@ resource "scaleway_instance_security_group" "worker" {
     ip_range = "0.0.0.0/0"
   }
 
-  # kubelet
-  inbound_rule {
-    action   = "accept"
-    port     = 10250
-    protocol = "TCP"
-    ip_range = "0.0.0.0/0"
-  }
-
-  # OpenVPN — tunnel NAS Synology (tun0)
+  # OpenVPN — tunnel NAS Synology (tun0) — NAS IP dynamique, ouvert nécessairement
   inbound_rule {
     action   = "accept"
     port     = 1194
@@ -128,7 +136,7 @@ resource "scaleway_instance_security_group" "worker" {
     ip_range = "0.0.0.0/0"
   }
 
-  # WireGuard VPN — accès sécurisé Jellyfin (wg0, worker-2)
+  # WireGuard VPN — accès sécurisé (wg0)
   inbound_rule {
     action   = "accept"
     port     = 51820
@@ -136,16 +144,33 @@ resource "scaleway_instance_security_group" "worker" {
     ip_range = "0.0.0.0/0"
   }
 
-  # Flannel VXLAN overlay
-  inbound_rule {
-    action   = "accept"
-    port     = 8472
-    protocol = "UDP"
-    ip_range = "0.0.0.0/0"
+  # kubelet, Flannel VXLAN, Beszel agent — restreint aux IPs du cluster
+  dynamic "inbound_rule" {
+    for_each = concat(
+      [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
+      [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    )
+    content {
+      action   = "accept"
+      port     = 10250
+      protocol = "TCP"
+      ip_range = inbound_rule.value
+    }
   }
 
-  # Beszel agent — le Hub (sur worker-1) se connecte aux agents sur ce port
-  # Restreint aux IPs des nœuds du cluster uniquement
+  dynamic "inbound_rule" {
+    for_each = concat(
+      [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
+      [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    )
+    content {
+      action   = "accept"
+      port     = 8472
+      protocol = "UDP"
+      ip_range = inbound_rule.value
+    }
+  }
+
   dynamic "inbound_rule" {
     for_each = concat(
       [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
