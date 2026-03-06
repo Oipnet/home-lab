@@ -64,6 +64,21 @@ resource "scaleway_instance_security_group" "control_plane" {
     protocol = "UDP"
     ip_range = "0.0.0.0/0"
   }
+
+  # Beszel agent — le Hub (sur worker-1) se connecte aux agents sur ce port
+  # Restreint aux IPs des nœuds du cluster uniquement
+  dynamic "inbound_rule" {
+    for_each = concat(
+      [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
+      [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    )
+    content {
+      action   = "accept"
+      port     = 45876
+      protocol = "TCP"
+      ip_range = inbound_rule.value
+    }
+  }
 }
 
 resource "scaleway_instance_security_group" "worker" {
@@ -127,6 +142,21 @@ resource "scaleway_instance_security_group" "worker" {
     port     = 8472
     protocol = "UDP"
     ip_range = "0.0.0.0/0"
+  }
+
+  # Beszel agent — le Hub (sur worker-1) se connecte aux agents sur ce port
+  # Restreint aux IPs des nœuds du cluster uniquement
+  dynamic "inbound_rule" {
+    for_each = concat(
+      [for ip in scaleway_instance_ip.control_plane : "${ip.address}/32"],
+      [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    )
+    content {
+      action   = "accept"
+      port     = 45876
+      protocol = "TCP"
+      ip_range = inbound_rule.value
+    }
   }
 }
 

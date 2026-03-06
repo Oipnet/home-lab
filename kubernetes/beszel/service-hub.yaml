@@ -1,0 +1,23 @@
+---
+# Service ClusterIP pour le Hub Beszel.
+# Accessible uniquement en interne au cluster (via Traefik Ingress).
+# Le port 45876 (agents) n'est PAS exposé ici : le Hub se connecte directement
+# aux IPs des nœuds via hostPort (connexion Hub→Agent, pas Agent→Hub).
+apiVersion: v1
+kind: Service
+metadata:
+  name: beszel-hub
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beszel
+    app.kubernetes.io/component: hub
+    app.kubernetes.io/part-of: homelab
+spec:
+  type: ClusterIP
+  selector:
+    app: beszel-hub
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http
+      protocol: TCP

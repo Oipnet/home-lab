@@ -1,0 +1,41 @@
+---
+# Ingress Traefik pour le Hub Beszel.
+# ⚠️ ADAPTE : remplacer beszel.forelse.fr par ton domaine et ajouter l'entrée DNS.
+#
+# WebSocket — comportement avec Traefik v3 :
+#   Traefik gère le WebSocket nativement sans annotation spéciale.
+#   Les connexions SSE/WS longue durée fonctionnent par défaut.
+#   Si tu observes des déconnexions, envisager un Middleware Traefik CRD avec
+#   un timeout adapté (readTimeout / writeTimeout sur l'entrypoint websecure).
+#
+# DNS à ajouter chez OVH : beszel.forelse.fr → 163.172.181.187 (worker-2, nœud Traefik)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: beszel-hub
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beszel
+    app.kubernetes.io/component: hub
+    app.kubernetes.io/part-of: homelab
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: beszel.forelse.fr  # ⚠️ ADAPTE
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: beszel-hub
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - beszel.forelse.fr  # ⚠️ ADAPTE
+      # Pas de secretName : Traefik gère le certificat via ACME (acme.json sur le PV)

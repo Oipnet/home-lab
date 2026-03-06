@@ -1,0 +1,121 @@
+---
+# Agent Beszel — déployé sur TOUS les nœuds du cluster (cp-1, worker-1, worker-2).
+#
+# MODELE DE COMMUNICATION (important) :
+#   Double canal :
+#   1. SSH    : Hub → Agent (port 45876) pour collecter les métriques
+#   2. WebSocket : Agent → Hub (HUB_URL) pour les mises à jour temps réel
+#   Les agents ont besoin d'accéder au Hub via HUB_URL.
+#
+# APRES DEPLOIEMENT — ajouter les systèmes dans l'UI Beszel :
+#   Systèmes → Add system → renseigner l'IP et le port 45876 de chaque nœud
+#     - cp-1    : 51.15.213.137:45876
+#     - worker-1 : 51.158.107.191:45876
+#     - worker-2 : 163.172.181.187:45876
+#   Le Hub se connecte directement aux IPs des nœuds (pas via le Service K8s).
+#   ⚠️ ADAPTE : vérifier les IPs avec "kubectl get nodes -o wide"
+#
+# PRIVILEGES :
+#   L'agent doit lire /proc et /sys du nœud hôte pour collecter CPU, mémoire,
+#   réseau et disque. C'est analogue à node_exporter (Prometheus).
+#   privileged: true est la méthode la plus simple et fiable pour cet usage.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: beszel-agent
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beszel
+    app.kubernetes.io/component: agent
+    app.kubernetes.io/part-of: homelab
+spec:
+  selector:
+    matchLabels:
+      app: beszel-agent
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: beszel-agent
+        app.kubernetes.io/name: beszel
+        app.kubernetes.io/component: agent
+    spec:
+      # Accès au réseau hôte pour collecter les interfaces réseau réelles du nœud
+      hostNetwork: true
+      # Nécessaire pour que /proc monté depuis l'hôte expose tous les processus
+      hostPID: true
+      # DNS cluster accessible même avec hostNetwork
+      dnsPolicy: ClusterFirstWithHostNet
+
+      # Tolérances pour déployer l'agent aussi sur le control-plane
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+        - name: beszel-agent
+          image: henrygd/beszel-agent:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            # hostPort expose ce port directement sur l'IP du nœud hôte
+            # C'est ce port que le Hub cible pour chaque système
+            - name: agent
+              containerPort: 45876
+              hostPort: 45876
+              protocol: TCP
+
+          env:
+            # Adresse d'écoute de l'agent SSH
+            - name: LISTEN
+              value: "0.0.0.0:45876"
+            # URL interne du Hub pour la connexion WebSocket (agent → hub)
+            # Résolu via le DNS cluster grâce à dnsPolicy: ClusterFirstWithHostNet
+            - name: HUB_URL
+              value: "http://beszel-hub.monitoring.svc.cluster.local:8090"
+            # Clé publique SSH du Hub — seul le Hub peut se connecter à cet agent
+            - name: KEY
+              valueFrom:
+                secretKeyRef:
+                  name: beszel-agent-key
+                  key: KEY
+
+          # Montage des systèmes de fichiers virtuels du nœud hôte
+          # Requis pour lire CPU (/proc/stat), mémoire (/proc/meminfo),
+          # réseau (/proc/net/dev), disque (/proc/diskstats) et températures (/sys/class/thermal)
+          volumeMounts:
+            - name: host-proc
+              mountPath: /proc
+              readOnly: true
+            - name: host-sys
+              mountPath: /sys
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+          securityContext:
+            # Requis pour accéder aux ressources système via /proc et /sys hôtes.
+            # Analogue à node_exporter en mode conteneur — pas de contournement simple
+            # sans perte de métriques. À revisiter si le cluster durcit les PSA.
+            privileged: true
+
+      volumes:
+        - name: host-proc
+          hostPath:
+            path: /proc
+        - name: host-sys
+          hostPath:
+            path: /sys

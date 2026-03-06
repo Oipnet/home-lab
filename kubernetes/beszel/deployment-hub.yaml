@@ -1,0 +1,94 @@
+---
+# Hub Beszel — interface web + base de données SQLite (via PocketBase).
+# Le Hub initie les connexions SSH vers les agents (port 45876 sur chaque nœud).
+# Une seule réplique car ReadWriteOnce sur le PV local.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beszel-hub
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beszel
+    app.kubernetes.io/component: hub
+    app.kubernetes.io/part-of: homelab
+spec:
+  replicas: 1
+  # Recreate nécessaire : PVC ReadWriteOnce ne tolère qu'un pod à la fois
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: beszel-hub
+  template:
+    metadata:
+      labels:
+        app: beszel-hub
+        app.kubernetes.io/name: beszel
+        app.kubernetes.io/component: hub
+    spec:
+      # ⚠️ ADAPTE : doit correspondre au nœud du PV (persistent-volume.yaml)
+      # Hypothèse : worker-1 (même nœud que le stockage Jellyfin)
+      nodeSelector:
+        kubernetes.io/hostname: worker-1
+
+      # securityContext retiré : l'image Beszel (scratch-based) tourne en root par défaut.
+      # Le binaire /beszel est la racine — /beszel/data est inaccessible comme mountPath.
+      # On monte le PVC sur /data et on passe --dir=/data à PocketBase.
+
+      containers:
+        - name: beszel-hub
+          image: henrygd/beszel:latest
+          imagePullPolicy: IfNotPresent
+
+          # PocketBase (base de Beszel) accepte --dir pour choisir le répertoire de données.
+          # ⚠️ Si beszel serve --help révèle un flag différent, adapter ici.
+          args: ["serve", "--http=0.0.0.0:8090", "--dir=/data"]
+
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+
+          env:
+            - name: TZ
+              value: "Europe/Paris"
+
+          volumeMounts:
+            # Données persistantes : base SQLite, clés SSH, configuration
+            # Monté sur /data (chemin court, existe dans presque toutes les images)
+            - name: data
+              mountPath: /data
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+          # Probe TCP : plus fiable que HTTP car l'endpoint /api/health
+          # peut varier selon les versions de Beszel (base PocketBase)
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: beszel-hub-pvc

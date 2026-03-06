@@ -1,0 +1,21 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: beszel-hub-pvc
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beszel
+    app.kubernetes.io/part-of: homelab
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: local-storage
+  # Lie ce PVC au PV beszel-hub-pv via ses labels
+  selector:
+    matchLabels:
+      volume: beszel-hub-data
+      app: beszel-hub
