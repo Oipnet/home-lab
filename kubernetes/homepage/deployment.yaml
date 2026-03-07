@@ -1,0 +1,111 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homepage
+  namespace: homepage
+  labels:
+    app.kubernetes.io/name: homepage
+    app.kubernetes.io/part-of: homelab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homepage
+  template:
+    metadata:
+      labels:
+        app: homepage
+    spec:
+      serviceAccountName: homepage
+
+      # Homepage est léger : pas de contrainte de nœud spécifique.
+      # Si tu veux l'épingler sur worker-2 (nœud Traefik) pour la latence :
+      # nodeSelector:
+      #   ingress: traefik
+
+      containers:
+        - name: homepage
+          image: ghcr.io/gethomepage/homepage:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: http
+              containerPort: 3000
+
+          env:
+            # HOMEPAGE_ALLOWED_HOSTS : obligatoire depuis Homepage v0.9.0
+            # Empêche les attaques de type Host Header Injection.
+            # Ajouter tous les domaines/IPs par lesquels Homepage sera accédé.
+            - name: HOMEPAGE_ALLOWED_HOSTS
+              value: "home.forelse.fr"
+
+            # Variables injectées depuis le Secret — accessibles dans les annotations
+            # Ingress sous la forme {{HOMEPAGE_VAR_JELLYFIN_API_KEY}}.
+            - name: HOMEPAGE_VAR_JELLYFIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: homepage-secrets
+                  key: JELLYFIN_API_KEY
+                  optional: true   # ne bloque pas le démarrage si le secret n'existe pas encore
+            # Ajoutez les futures clés ici sur le même modèle :
+            # - name: HOMEPAGE_VAR_GRAFANA_API_KEY
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: homepage-secrets
+            #       key: GRAFANA_API_KEY
+            #       optional: true
+
+          # Montage des fichiers de config via subPath : seuls les fichiers gérés
+          # en ConfigMap sont écrasés ; Homepage peut écrire librement dans le reste
+          # du répertoire /app/config/ (logs, cache, etc.).
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/settings.yaml
+              subPath: settings.yaml
+              readOnly: true
+            - name: config
+              mountPath: /app/config/services.yaml
+              subPath: services.yaml
+              readOnly: true
+            - name: config
+              mountPath: /app/config/widgets.yaml
+              subPath: widgets.yaml
+              readOnly: true
+            - name: config
+              mountPath: /app/config/bookmarks.yaml
+              subPath: bookmarks.yaml
+              readOnly: true
+            - name: config
+              mountPath: /app/config/kubernetes.yaml
+              subPath: kubernetes.yaml
+              readOnly: true
+            - name: config
+              mountPath: /app/config/docker.yaml
+              subPath: docker.yaml
+              readOnly: true
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+
+      volumes:
+        - name: config
+          configMap:
+            name: homepage-config

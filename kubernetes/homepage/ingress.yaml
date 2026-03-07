@@ -1,32 +1,34 @@
 ---
-# ATTENTION : Headlamp expose l'intégralité du cluster K8s.
-# Envisager de restreindre l'accès (VPN, IP allowlist, auth middleware).
+# DNS à ajouter chez OVH : home.forelse.fr → 163.172.181.187 (worker-2, nœud Traefik)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: headlamp
-  namespace: headlamp
+  name: homepage
+  namespace: homepage
   labels:
-    app.kubernetes.io/name: headlamp
+    app.kubernetes.io/name: homepage
     app.kubernetes.io/part-of: homelab
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
     traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+    # Accès restreint VPN + LAN uniquement — Homepage expose la totalité de ton infra.
+    # Retirer cette annotation seulement si tu protèges Homepage avec une auth forte (Authelia, etc.).
+    traefik.ingress.kubernetes.io/router.middlewares: homepage-vpn-only@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
-    - host: headlamp.forelse.fr
+    - host: home.forelse.fr
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: headlamp
+                name: homepage
                 port:
                   name: http
   tls:
     - hosts:
-        - headlamp.forelse.fr
+        - home.forelse.fr
       # Pas de secretName : Traefik gère le certificat via ACME (acme.json sur le PV)

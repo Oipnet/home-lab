@@ -12,6 +12,25 @@ metadata:
     traefik.ingress.kubernetes.io/router.tls: "true"
     traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
     traefik.ingress.kubernetes.io/router.middlewares: jellyfin-vpn-only@kubernetescrd
+
+    # --- Intégration Homepage (auto-discovery) ---
+    # Homepage lit ces annotations et génère automatiquement la carte du service.
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Jellyfin"
+    gethomepage.dev/description: "Serveur multimédia"
+    gethomepage.dev/group: "Médias"
+    gethomepage.dev/icon: "jellyfin"
+    gethomepage.dev/href: "https://jellyfin.forelse.fr"
+    # Sélecteur de pod pour afficher le statut en temps réel dans Homepage
+    gethomepage.dev/pod-selector: "app=jellyfin"
+    # Widget Jellyfin — affiche films/séries/épisodes récemment ajoutés et sessions actives.
+    # La clé API est stockée dans le Secret homepage-secrets, injectée via HOMEPAGE_VAR_*.
+    # Pour obtenir la clé : Jellyfin → Tableau de bord → Clés API → Créer une clé.
+    gethomepage.dev/widget.type: "jellyfin"
+    gethomepage.dev/widget.url: "https://jellyfin.forelse.fr"
+    gethomepage.dev/widget.key: "{{HOMEPAGE_VAR_JELLYFIN_API_KEY}}"
+    gethomepage.dev/widget.enableBlocks: "true"
+
 spec:
   ingressClassName: traefik
   rules:

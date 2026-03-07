@@ -1,0 +1,108 @@
+---
+# ConfigMap contenant tous les fichiers de configuration Homepage.
+# Chaque clé correspond à un fichier monté via subPath dans le Deployment.
+#
+# Architecture de la configuration :
+#   - settings.yaml  : titre, thème, layout des groupes
+#   - services.yaml  : vide — tout est découvert via annotations Ingress (gethomepage.dev/*)
+#   - widgets.yaml   : widgets globaux (kubernetes, datetime, recherche)
+#   - bookmarks.yaml : liens rapides statiques
+#   - kubernetes.yaml: activation de l'intégration Kubernetes (mode cluster)
+#   - docker.yaml    : vide — pas de Docker dans ce setup
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: homepage-config
+  namespace: homepage
+  labels:
+    app.kubernetes.io/name: homepage
+    app.kubernetes.io/part-of: homelab
+data:
+  settings.yaml: |
+    title: Homelab forelse
+    description: Dashboard central du homelab
+    theme: dark
+    color: slate
+    headerStyle: clean
+    # Ordre et mise en page des groupes de services.
+    # Les groupes correspondent aux valeurs de l'annotation gethomepage.dev/group sur les Ingress.
+    layout:
+      Médias:
+        style: row
+        columns: 4
+      Monitoring:
+        style: row
+        columns: 4
+      Infrastructure:
+        style: row
+        columns: 4
+      Stockage:
+        style: row
+        columns: 4
+
+  services.yaml: |
+    # Vide intentionnellement.
+    # Les services sont découverts automatiquement via les annotations gethomepage.dev/*
+    # posées sur les ressources Ingress Kubernetes.
+    # N'ajoutez ici que les services sans Ingress Kubernetes (ex: NAS Synology en direct).
+    #
+    # Exemple d'entrée manuelle :
+    # - Stockage:
+    #     - NAS Synology:
+    #         href: http://192.168.1.x:5000
+    #         description: Synology DS220j
+    #         icon: synology-dsm
+    #         ping: http://192.168.1.x:5000
+
+  widgets.yaml: |
+    # Widget Kubernetes : affiche l'état du cluster et des nœuds.
+    # Les métriques CPU/RAM nécessitent metrics-server installé dans le cluster.
+    # Sans metrics-server : les compteurs de pods restent affichés, CPU/RAM seront vides.
+    - kubernetes:
+        cluster:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+          label: "homelab"
+        nodes:
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
+
+    # Widget date/heure en français
+    - datetime:
+        text_size: xl
+        format:
+          dateStyle: long
+          timeStyle: short
+          hourCycle: h23
+          locale: fr-FR
+
+    # Barre de recherche DuckDuckGo
+    - search:
+        provider: duckduckgo
+        target: _blank
+
+  bookmarks.yaml: |
+    - Infrastructure:
+        - Scaleway Console:
+            - icon: scaleway
+              href: "https://console.scaleway.com"
+        - OVH Manager:
+            - icon: ovh
+              href: "https://www.ovh.com/manager/"
+    - Code:
+        - GitHub:
+            - icon: github
+              href: "https://github.com"
+
+  kubernetes.yaml: |
+    # Mode "cluster" : Homepage utilise le ServiceAccount injecté par Kubernetes
+    # (token monté automatiquement dans /var/run/secrets/kubernetes.io/serviceaccount/).
+    # Aucune kubeconfig externe nécessaire.
+    mode: cluster
+
+  docker.yaml: |
+    # Vide — pas d'intégration Docker dans ce setup Kubernetes natif.
