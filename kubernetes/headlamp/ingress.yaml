@@ -13,6 +13,15 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
     traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+
+    # --- Intégration Homepage ---
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Headlamp"
+    gethomepage.dev/description: "Interface Kubernetes"
+    gethomepage.dev/group: "Infrastructure"
+    gethomepage.dev/icon: "kubernetes"
+    gethomepage.dev/href: "https://headlamp.forelse.fr"
+    gethomepage.dev/pod-selector: "app=headlamp"
 spec:
   ingressClassName: traefik
   rules:

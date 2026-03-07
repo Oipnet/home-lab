@@ -22,6 +22,15 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
     traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+
+    # --- Intégration Homepage ---
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/name: "Beszel"
+    gethomepage.dev/description: "Monitoring léger du cluster"
+    gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/icon: "beszel"
+    gethomepage.dev/href: "https://beszel.forelse.fr"
+    gethomepage.dev/pod-selector: "app.kubernetes.io/name=beszel,app.kubernetes.io/component=hub"
 spec:
   ingressClassName: traefik
   rules:

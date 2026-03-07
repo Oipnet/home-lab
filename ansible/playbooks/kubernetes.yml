@@ -100,8 +100,19 @@
       command: "kubectl label node {{ inventory_hostname }} node-role.kubernetes.io/worker=worker --overwrite"
       changed_when: true
 
+    - name: Label all workers as Traefik ingress nodes
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      command: "kubectl label node {{ inventory_hostname }} ingress=traefik --overwrite"
+      changed_when: true
+
     - name: Label worker-1 as Plex storage node
       delegate_to: "{{ groups['control_plane'][0] }}"
       command: "kubectl label node {{ groups['workers'][0] }} storage=plex --overwrite"
       when: inventory_hostname == groups['workers'][0]
       changed_when: true
+
+    - name: Create Traefik ACME data directory on workers
+      file:
+        path: /data/traefik/acme
+        state: directory
+        mode: "0700"

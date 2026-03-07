@@ -8,6 +8,10 @@ output "worker_public_ips" {
   value       = scaleway_instance_ip.worker[*].address
 }
 
+output "lb_public_ip" {
+  description = "Public IP of the load balancer (lb-1)"
+  value       = scaleway_instance_ip.lb.address
+}
 
 output "private_network_id" {
   description = "ID of the private VPC network"
@@ -20,5 +24,6 @@ output "ansible_inventory" {
   value = templatefile("${path.module}/templates/inventory.tpl", {
     control_plane_ips = scaleway_instance_ip.control_plane[*].address
     worker_ips        = scaleway_instance_ip.worker[*].address
+    lb_ips            = [scaleway_instance_ip.lb.address]
   })
 }

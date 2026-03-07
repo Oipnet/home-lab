@@ -15,3 +15,12 @@ workers
 [k8s_cluster:vars]
 ansible_python_interpreter=/usr/bin/python3
 ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+[load_balancers]
+%{ for i, ip in lb_ips ~}
+lb-${i + 1} ansible_host=${ip} ansible_user=root
+%{ endfor ~}
+
+[load_balancers:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'

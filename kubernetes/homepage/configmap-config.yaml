@@ -41,18 +41,17 @@ data:
         columns: 4
 
   services.yaml: |
-    # Vide intentionnellement.
-    # Les services sont découverts automatiquement via les annotations gethomepage.dev/*
-    # posées sur les ressources Ingress Kubernetes.
-    # N'ajoutez ici que les services sans Ingress Kubernetes (ex: NAS Synology en direct).
-    #
-    # Exemple d'entrée manuelle :
-    # - Stockage:
-    #     - NAS Synology:
-    #         href: http://192.168.1.x:5000
-    #         description: Synology DS220j
-    #         icon: synology-dsm
-    #         ping: http://192.168.1.x:5000
+    # Services sans Ingress Kubernetes — entrées statiques.
+    # Les services avec Ingress sont découverts automatiquement via annotations gethomepage.dev/*.
+    - Infrastructure:
+        - Traefik:
+            href: "https://home.forelse.fr"
+            description: "Ingress controller (DaemonSet worker-1 + worker-2)"
+            icon: traefik
+        - NAS Synology:
+            href: "http://192.168.1.254:5000"
+            description: "Synology DS220j"
+            icon: synology-dsm
 
   widgets.yaml: |
     # Widget Kubernetes : affiche l'état du cluster et des nœuds.

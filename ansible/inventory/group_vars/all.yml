@@ -27,3 +27,6 @@ wg_vpn_pi_ip: "10.200.0.3"              # IP WireGuard du Pi dans le tunnel
 wg_vpn_subnet: "10.200.0.0/24"          # Subnet du tunnel VPN
 wg_vpn_users_subnet: "10.201.0.0/24"    # Clients utilisateurs (mobile, etc.)
 lan_subnet: "192.168.1.0/24"            # LAN maison (Freebox)
+
+# HAProxy — load balancer (lb-1)
+haproxy_stats_port: 8404                # Interface stats HAProxy (accès restreint)

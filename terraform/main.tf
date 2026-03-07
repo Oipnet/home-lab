@@ -97,6 +97,49 @@ resource "scaleway_instance_security_group" "control_plane" {
   }
 }
 
+resource "scaleway_instance_security_group" "lb" {
+  name                    = "${var.project_name}-lb-sg"
+  inbound_default_policy  = "drop"
+  outbound_default_policy = "accept"
+
+  # SSH — une règle par CIDR autorisé
+  dynamic "inbound_rule" {
+    for_each = var.allowed_ssh_cidrs
+    content {
+      action   = "accept"
+      port     = 22
+      protocol = "TCP"
+      ip_range = inbound_rule.value
+    }
+  }
+
+  # HTTP / HTTPS — trafic public entrant sur lb-1
+  inbound_rule {
+    action   = "accept"
+    port     = 80
+    protocol = "TCP"
+    ip_range = "0.0.0.0/0"
+  }
+
+  inbound_rule {
+    action   = "accept"
+    port     = 443
+    protocol = "TCP"
+    ip_range = "0.0.0.0/0"
+  }
+
+  # HAProxy stats (optionnel, accès restreint)
+  dynamic "inbound_rule" {
+    for_each = var.allowed_ssh_cidrs
+    content {
+      action   = "accept"
+      port     = 8404
+      protocol = "TCP"
+      ip_range = inbound_rule.value
+    }
+  }
+}
+
 resource "scaleway_instance_security_group" "worker" {
   name                    = "${var.project_name}-worker-sg"
   inbound_default_policy  = "drop"
@@ -113,19 +156,19 @@ resource "scaleway_instance_security_group" "worker" {
     }
   }
 
-  # HTTP / HTTPS — Traefik ingress (hostPort)
+  # HTTP / HTTPS — uniquement depuis lb-1 (HAProxy)
   inbound_rule {
     action   = "accept"
     port     = 80
     protocol = "TCP"
-    ip_range = "0.0.0.0/0"
+    ip_range = "${scaleway_instance_ip.lb.address}/32"
   }
 
   inbound_rule {
     action   = "accept"
     port     = 443
     protocol = "TCP"
-    ip_range = "0.0.0.0/0"
+    ip_range = "${scaleway_instance_ip.lb.address}/32"
   }
 
   # OpenVPN — tunnel NAS Synology (tun0) — NAS IP dynamique, ouvert nécessairement
@@ -269,4 +312,34 @@ resource "scaleway_instance_ip" "control_plane" {
 resource "scaleway_instance_ip" "worker" {
   count = var.worker_count
   zone  = var.zone
+}
+
+resource "scaleway_instance_ip" "lb" {
+  zone = var.zone
+}
+
+# ─────────────────────────────────────────────
+# Load Balancer Node (lb-1)
+# ─────────────────────────────────────────────
+resource "scaleway_instance_server" "lb" {
+  name  = "${var.project_name}-lb-1"
+  type  = var.lb_type
+  image = var.image
+  zone  = var.zone
+  ip_id = scaleway_instance_ip.lb.id
+
+  security_group_id = scaleway_instance_security_group.lb.id
+
+  private_network {
+    pn_id = scaleway_vpc_private_network.k8s.id
+  }
+
+  user_data = {
+    cloud-init = templatefile("${path.module}/cloud-init/lb.yaml.tpl", {
+      node_index   = 0
+      project_name = var.project_name
+    })
+  }
+
+  tags = ["${var.project_name}", "load-balancer", "haproxy"]
 }

@@ -51,6 +51,12 @@ variable "worker_type" {
   default     = "DEV1-S" # 2 vCPU, 2 GB RAM
 }
 
+variable "lb_type" {
+  description = "Instance type for the load balancer (lb-1)"
+  type        = string
+  default     = "DEV1-S" # 2 vCPU, 2 GB RAM — suffisant pour HAProxy
+}
+
 variable "image" {
   description = "OS image for all nodes"
   type        = string
