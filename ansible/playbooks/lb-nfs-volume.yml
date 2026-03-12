@@ -1,0 +1,89 @@
+---
+# Formate et monte le volume bloc Scaleway (50 Go) sur lb-1, puis crée /data/app-files.
+# À exécuter UNE SEULE FOIS après terraform apply, avant nfs-server-lb1.yml.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.ini playbooks/lb-nfs-volume.yml
+#
+# Si le device n'est pas /dev/sdb, passer : -e data_block_device=/dev/vdb
+# (vérifier avec : ssh root@lb-1 lsblk)
+
+- name: Format and mount NFS data volume on lb-1
+  hosts: load_balancers
+  become: true
+
+  vars:
+    data_device: "{{ data_block_device | default('/dev/sdb') }}"
+    data_mount: /data
+    nfs_export_path: /data/app-files
+    fs_type: ext4
+
+  tasks:
+    - name: Check device exists
+      stat:
+        path: "{{ data_device }}"
+      register: device_stat
+
+    - name: Fail if device not found
+      fail:
+        msg: >
+          Device {{ data_device }} not found.
+          Pass -e data_block_device=/dev/vdb if needed.
+          Run 'lsblk' on lb-1 to find the correct device name.
+      when: not device_stat.stat.exists
+
+    - name: Get device filesystem type
+      command: blkid -s TYPE -o value {{ data_device }}
+      register: blkid_type
+      changed_when: false
+      failed_when: false
+
+    - name: Format device with ext4
+      command: mkfs.ext4 -L nfs-data {{ data_device }}
+      when: blkid_type.stdout == ""
+
+    - name: Get device UUID
+      command: blkid -s UUID -o value {{ data_device }}
+      register: device_uuid
+      changed_when: false
+
+    - name: Create mount point
+      file:
+        path: "{{ data_mount }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Add /data entry to fstab
+      mount:
+        path: "{{ data_mount }}"
+        src: "UUID={{ device_uuid.stdout }}"
+        fstype: "{{ fs_type }}"
+        opts: defaults,noatime
+        state: present
+
+    - name: Mount /data
+      mount:
+        path: "{{ data_mount }}"
+        src: "UUID={{ device_uuid.stdout }}"
+        fstype: "{{ fs_type }}"
+        opts: defaults,noatime
+        state: mounted
+
+    - name: Create NFS export directory
+      file:
+        path: "{{ nfs_export_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Verify mount
+      command: df -h {{ data_mount }}
+      register: df_result
+      changed_when: false
+
+    - name: Show mount info
+      debug:
+        msg: "{{ df_result.stdout_lines }}"

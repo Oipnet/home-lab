@@ -1,0 +1,58 @@
+---
+# Mount the NFS share from lb-1 on all K8s workers.
+# This enables NFS-backed PersistentVolumes accessible from any worker node.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.ini playbooks/nfs-clients-workers.yml
+#
+# Prerequisites: nfs-server-lb1.yml must have been run first.
+
+- name: Configure NFS clients on K8s workers
+  hosts: workers
+  become: true
+
+  vars:
+    nfs_server: "212.47.250.233"   # lb-1
+    nfs_remote_path: /data/app-files
+    nfs_local_mount: /mnt/app-files
+    nfs_mount_options: "nfs defaults,_netdev 0 0"
+
+  tasks:
+    - name: Install NFS client packages
+      apt:
+        name:
+          - nfs-common
+        state: present
+        update_cache: true
+
+    - name: Create local mount point
+      file:
+        path: "{{ nfs_local_mount }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Add NFS mount to /etc/fstab
+      lineinfile:
+        path: /etc/fstab
+        line: "{{ nfs_server }}:{{ nfs_remote_path }} {{ nfs_local_mount }} {{ nfs_mount_options }}"
+        regexp: "^{{ nfs_server | regex_escape() }}:{{ nfs_remote_path | regex_escape() }}\\s"
+        state: present
+
+    - name: Mount NFS share
+      mount:
+        path: "{{ nfs_local_mount }}"
+        src: "{{ nfs_server }}:{{ nfs_remote_path }}"
+        fstype: nfs
+        opts: defaults,_netdev
+        state: mounted
+
+    - name: Verify mount is accessible
+      stat:
+        path: "{{ nfs_local_mount }}"
+      register: mount_stat
+
+    - name: Confirm mount
+      debug:
+        msg: "NFS mount {{ nfs_local_mount }} is {{ 'accessible' if mount_stat.stat.exists else 'NOT accessible' }}"

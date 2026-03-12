@@ -1,0 +1,128 @@
+---
+# Étape 5 — Vérifier que la migration est fonctionnelle sur lb-1
+#
+# Ce playbook vérifie :
+#   - La structure des dossiers et le symlink
+#   - Que le répertoire NFS contient bien des données
+#   - La connectivité SSH root depuis lb-1 vers l'ancien serveur
+#   - Que le chemin legacy (/var/www/...) pointe bien vers /data/app-files
+#   - Que le NFS est bien exporté
+#
+# Usage :
+#   ansible-playbook -i inventory/hosts.ini playbooks/migration-verify.yml
+
+- name: Verify migration setup on lb-1
+  hosts: load_balancers
+  become: true
+  gather_facts: false
+
+  vars:
+    old_server_ip: "51.158.68.24"
+    app_domain: "fs-cartes113.forelse.info"
+    app_legacy_path: "/var/www/fs-cartes113.forelse.info/var"
+    nfs_data_path: "/data/app-files"
+
+  tasks:
+    - name: Check NFS data directory exists
+      stat:
+        path: "{{ nfs_data_path }}"
+      register: nfs_dir
+
+    - name: Assert NFS directory exists
+      assert:
+        that: nfs_dir.stat.exists and nfs_dir.stat.isdir
+        fail_msg: "ERREUR : {{ nfs_data_path }} n'existe pas ou n'est pas un répertoire"
+        success_msg: "OK : {{ nfs_data_path }} existe"
+
+    - name: Check symlink exists and points to correct target
+      stat:
+        path: "{{ app_legacy_path }}/data"
+      register: symlink_stat
+
+    - name: Assert symlink is correct
+      assert:
+        that:
+          - symlink_stat.stat.exists
+          - symlink_stat.stat.islnk
+          - symlink_stat.stat.lnk_target == nfs_data_path
+        fail_msg: >
+          ERREUR : le symlink {{ app_legacy_path }}/data est absent ou pointe vers
+          '{{ symlink_stat.stat.lnk_target | default("rien") }}' au lieu de '{{ nfs_data_path }}'
+        success_msg: "OK : symlink {{ app_legacy_path }}/data -> {{ nfs_data_path }}"
+
+    - name: Count files in NFS data directory
+      find:
+        paths: "{{ nfs_data_path }}"
+        recurse: false
+      register: nfs_files
+
+    - name: Print file count
+      debug:
+        msg: "Fichiers dans {{ nfs_data_path }} (racine) : {{ nfs_files.matched }}"
+
+    - name: Show disk usage of NFS data
+      command: du -sh {{ nfs_data_path }}
+      register: du_result
+      changed_when: false
+
+    - name: Print disk usage
+      debug:
+        msg: "Taille totale {{ nfs_data_path }} : {{ du_result.stdout }}"
+
+    - name: Check NFS export is active
+      command: exportfs -v
+      register: exports_out
+      changed_when: false
+
+    - name: Assert NFS path is exported
+      assert:
+        that: nfs_data_path in exports_out.stdout
+        fail_msg: "ERREUR : {{ nfs_data_path }} n'est pas dans les exports NFS actifs"
+        success_msg: "OK : {{ nfs_data_path }} est bien exporté via NFS"
+
+    - name: Print active NFS exports
+      debug:
+        var: exports_out.stdout_lines
+
+    - name: Test SSH connectivity to old server
+      command: >
+        ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5
+        root@{{ old_server_ip }} echo "SSH OK"
+      register: ssh_test
+      changed_when: false
+      ignore_errors: true
+
+    - name: Print SSH test result
+      debug:
+        msg: >
+          SSH vers ancien serveur ({{ old_server_ip }}) :
+          {{ 'OK' if ssh_test.rc == 0 else 'ECHEC — vérifier la clé SSH entre lb-1 et ancien serveur' }}
+
+    - name: Test rsync dry-run from old server path
+      command: >
+        rsync --dry-run --archive
+        -e "ssh -o StrictHostKeyChecking=no -o BatchMode=yes"
+        root@{{ old_server_ip }}:/var/www/{{ app_domain }}/var/data/
+        {{ nfs_data_path }}/
+      register: rsync_dry
+      changed_when: false
+      ignore_errors: true
+      when: ssh_test.rc == 0
+
+    - name: Print rsync dry-run result
+      debug:
+        msg: >
+          Rsync dry-run :
+          {{ 'OK — prêt pour la synchro finale' if rsync_dry.rc | default(1) == 0
+             else 'ECHEC — ' + (rsync_dry.stderr | default('erreur inconnue')) }}
+      when: ssh_test.rc == 0
+
+    - name: Summary
+      debug:
+        msg:
+          - "=== RÉSUMÉ MIGRATION ==="
+          - "NFS dir       : {{ 'OK' if nfs_dir.stat.exists else 'MANQUANT' }}"
+          - "Symlink       : {{ 'OK' if symlink_stat.stat.islnk | default(false) else 'MANQUANT' }}"
+          - "NFS export    : {{ 'OK' if nfs_data_path in exports_out.stdout else 'MANQUANT' }}"
+          - "SSH old server: {{ 'OK' if ssh_test.rc == 0 else 'ECHEC' }}"
+          - "Taille data   : {{ du_result.stdout }}"

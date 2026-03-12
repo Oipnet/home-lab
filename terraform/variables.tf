@@ -71,8 +71,20 @@ variable "ssh_public_key_path" {
 
 # Networking
 variable "allowed_ssh_cidrs" {
-  description = "CIDRs allowed to SSH into nodes"
+  description = "CIDRs allowed to SSH into cluster nodes (control plane, workers) — restreint"
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "lb_ssh_cidrs" {
+  description = "CIDRs allowed to SSH into lb-1 — plus permissif car les clients rsync via SSH"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "extra_ssh_public_keys" {
+  description = "Clés SSH supplémentaires à ajouter au projet Scaleway (map nom -> clé publique)"
+  type        = map(string)
+  default     = {}
 }
 

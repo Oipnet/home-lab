@@ -1,0 +1,18 @@
+---
+# PVC pour le PV NFS app-files — à adapter par namespace/app.
+# Le pod peut tourner sur worker-1 ou worker-2 sans nodeAffinity.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-files-pvc
+  namespace: default   # ⚠️ adapter au namespace de l'app
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-storage
+  resources:
+    requests:
+      storage: 50Gi
+  selector:
+    matchLabels:
+      volume: app-files

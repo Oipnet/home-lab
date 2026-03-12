@@ -6,6 +6,12 @@ resource "scaleway_iam_ssh_key" "homelab" {
   public_key = file(var.ssh_public_key_path)
 }
 
+resource "scaleway_iam_ssh_key" "extra" {
+  for_each   = var.extra_ssh_public_keys
+  name       = each.key
+  public_key = each.value
+}
+
 # ─────────────────────────────────────────────
 # Private Network (VPC)
 # ─────────────────────────────────────────────
@@ -102,9 +108,10 @@ resource "scaleway_instance_security_group" "lb" {
   inbound_default_policy  = "drop"
   outbound_default_policy = "accept"
 
-  # SSH — une règle par CIDR autorisé
+  # SSH — ouvert aux clients rsync (lb_ssh_cidrs, par défaut 0.0.0.0/0)
+  # lb-1 est public, la sécurité repose sur les clés SSH
   dynamic "inbound_rule" {
-    for_each = var.allowed_ssh_cidrs
+    for_each = var.lb_ssh_cidrs
     content {
       action   = "accept"
       port     = 22
@@ -134,6 +141,17 @@ resource "scaleway_instance_security_group" "lb" {
     content {
       action   = "accept"
       port     = 8404
+      protocol = "TCP"
+      ip_range = inbound_rule.value
+    }
+  }
+
+  # NFS — accès depuis les workers uniquement (serveur NFS sur lb-1)
+  dynamic "inbound_rule" {
+    for_each = [for ip in scaleway_instance_ip.worker : "${ip.address}/32"]
+    content {
+      action   = "accept"
+      port     = 2049
       protocol = "TCP"
       ip_range = inbound_rule.value
     }
@@ -268,6 +286,16 @@ resource "scaleway_block_volume" "worker1_data" {
 }
 
 # ─────────────────────────────────────────────
+# Block Volume — NFS partagé sur lb-1
+# ─────────────────────────────────────────────
+resource "scaleway_block_volume" "lb_nfs_data" {
+  name       = "${var.project_name}-lb-nfs-data"
+  iops       = 5000
+  size_in_gb = 50
+  zone       = var.zone
+}
+
+# ─────────────────────────────────────────────
 # Worker Nodes
 # ─────────────────────────────────────────────
 resource "scaleway_instance_server" "worker" {
@@ -329,6 +357,8 @@ resource "scaleway_instance_server" "lb" {
   ip_id = scaleway_instance_ip.lb.id
 
   security_group_id = scaleway_instance_security_group.lb.id
+
+  additional_volume_ids = [scaleway_block_volume.lb_nfs_data.id]
 
   private_network {
     pn_id = scaleway_vpc_private_network.k8s.id

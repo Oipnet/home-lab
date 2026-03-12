@@ -1,0 +1,127 @@
+---
+# Étape 1 — Préparer lb-1 pour recevoir la migration de fs-cartes113.forelse.info
+#
+# Ce playbook :
+#   - Copie les clés SSH autorisées depuis l'ancien serveur vers lb-1
+#     (permet au client de continuer à rsync sans changer sa config)
+#   - S'assure que PermitRootLogin est activé sur lb-1
+#   - Crée /data/app-files (répertoire NFS)
+#   - Crée le symlink attendu par le script rsync client :
+#     /var/www/fs-cartes113.forelse.info/var/data -> /data/app-files
+#
+# Prérequis : lb-1 doit déjà être monté comme serveur NFS (nfs-server-lb1.yml)
+#
+# Usage :
+#   ansible-playbook -i inventory/hosts.ini playbooks/migration-prepare-new-server.yml
+
+- name: Fetch authorized_keys from old server
+  hosts: migration_source
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read authorized_keys from old server
+      slurp:
+        src: /root/.ssh/authorized_keys
+      register: old_authorized_keys
+      ignore_errors: true
+
+    - name: Set fact with decoded keys
+      set_fact:
+        old_keys_content: "{{ old_authorized_keys.content | b64decode }}"
+      when: old_authorized_keys is success
+
+
+- name: Prepare lb-1 as new server for fs-cartes113.forelse.info
+  hosts: load_balancers
+  become: true
+  gather_facts: false
+
+  vars:
+    app_domain: "fs-cartes113.forelse.info"
+    app_legacy_path: "/var/www/fs-cartes113.forelse.info/var"
+    nfs_data_path: "/data/app-files"
+
+  tasks:
+    - name: Ensure /root/.ssh exists on lb-1
+      file:
+        path: /root/.ssh
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Ensure authorized_keys file exists on lb-1
+      file:
+        path: /root/.ssh/authorized_keys
+        state: touch
+        owner: root
+        group: root
+        mode: "0600"
+        modification_time: preserve
+        access_time: preserve
+
+    - name: Append authorized_keys from old server
+      blockinfile:
+        path: /root/.ssh/authorized_keys
+        block: "{{ hostvars['old-cartes113'].old_keys_content }}"
+        marker: "# {mark} ANSIBLE MANAGED — clés migrées depuis 51.158.68.24"
+        create: true
+      when: hostvars['old-cartes113'].old_keys_content is defined
+
+    - name: Ensure PermitRootLogin is enabled in sshd_config
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin without-password"
+        state: present
+      notify: Reload SSH
+
+    - name: Ensure PubkeyAuthentication is enabled
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PubkeyAuthentication"
+        line: "PubkeyAuthentication yes"
+        state: present
+      notify: Reload SSH
+
+    - name: Create NFS data directory
+      file:
+        path: "{{ nfs_data_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create legacy vhost var directory
+      file:
+        path: "{{ app_legacy_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create symlink legacy path -> NFS data
+      file:
+        src: "{{ nfs_data_path }}"
+        dest: "{{ app_legacy_path }}/data"
+        state: link
+        force: false
+
+    - name: Verify symlink target
+      stat:
+        path: "{{ app_legacy_path }}/data"
+      register: symlink_stat
+
+    - name: Print symlink info
+      debug:
+        msg: >
+          Symlink: {{ app_legacy_path }}/data
+          -> {{ symlink_stat.stat.lnk_target | default('NOT A SYMLINK') }}
+          (existe: {{ symlink_stat.stat.exists }})
+
+  handlers:
+    - name: Reload SSH
+      systemd:
+        name: sshd
+        state: reloaded

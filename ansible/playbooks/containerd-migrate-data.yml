@@ -1,0 +1,191 @@
+---
+# containerd-migrate-data.yml — Migre /var/lib/containerd vers /data/containerd sur worker-1.
+#
+# Pré-requis : /data doit être monté (volume bloc Scaleway, voir worker-data-volume.yml).
+#
+# Stratégie : symlink /var/lib/containerd → /data/containerd
+#   - Pas de modification de config containerd
+#   - containerd retrouve ses containers/images après restart (~30s d'interruption)
+#   - Cordon/uncordon pour éviter que kubelet replanifie des pods pendant l'opération
+#
+# Lancement :
+#   ansible-playbook -i inventory/hosts.ini playbooks/containerd-migrate-data.yml
+
+# ── 1. Cordon worker-1 (depuis cp-1) ─────────────────────────────────────────
+- name: Cordon worker-1
+  hosts: control_plane
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Cordon worker-1 (no new pods scheduled)
+      command: kubectl cordon worker-1
+      changed_when: true
+
+# ── 2. Migration containerd sur worker-1 ──────────────────────────────────────
+- name: Migrate containerd storage to /data
+  hosts: workers[0]
+  become: yes
+  gather_facts: yes
+
+  vars:
+    containerd_src: /var/lib/containerd
+    containerd_dst: /data/containerd
+    containerd_bak: /var/lib/containerd.bak
+
+  tasks:
+    # ── Vérifications préalables ───────────────────────────────────────────────
+    - name: Check /data is mounted on a separate device
+      command: mountpoint -q /data
+      changed_when: false
+      register: data_mounted
+      failed_when: data_mounted.rc != 0
+
+    - name: Check /data free space
+      command: df -BG /data --output=avail
+      register: data_free
+      changed_when: false
+
+    - name: Show /data free space
+      debug:
+        msg: "/data espace libre : {{ data_free.stdout_lines[1] | trim }}"
+
+    - name: Check containerd source size
+      command: du -sh {{ containerd_src }}
+      register: containerd_size
+      changed_when: false
+
+    - name: Show containerd size
+      debug:
+        msg: "/var/lib/containerd taille : {{ containerd_size.stdout_lines[0] }}"
+
+    - name: Abort if destination already exists (idempotency guard)
+      stat:
+        path: "{{ containerd_dst }}"
+      register: dst_stat
+
+    - name: Fail if destination already exists
+      fail:
+        msg: >
+          {{ containerd_dst }} existe déjà.
+          Si la migration est déjà faite, vérifiez que /var/lib/containerd est un symlink.
+          Sinon, supprimez manuellement {{ containerd_dst }} et relancez.
+      when: dst_stat.stat.exists and not dst_stat.stat.islnk is defined
+
+    # ── Stop containerd ────────────────────────────────────────────────────────
+    - name: Stop kubelet (évite que kubelet relance containerd)
+      systemd:
+        name: kubelet
+        state: stopped
+
+    - name: Stop containerd
+      systemd:
+        name: containerd
+        state: stopped
+
+    # ── Copie des données ──────────────────────────────────────────────────────
+    - name: Create destination directory
+      file:
+        path: "{{ containerd_dst }}"
+        state: directory
+        mode: '0710'
+        owner: root
+        group: root
+
+    - name: Rsync containerd data to /data (preserve all attributes)
+      command: >
+        rsync -aAX --delete
+        {{ containerd_src }}/
+        {{ containerd_dst }}/
+      register: rsync_result
+      changed_when: rsync_result.rc == 0
+
+    # ── Pivot : symlink ────────────────────────────────────────────────────────
+    - name: Rename original directory to backup
+      command: mv {{ containerd_src }} {{ containerd_bak }}
+      args:
+        creates: "{{ containerd_bak }}"
+
+    - name: Create symlink /var/lib/containerd → /data/containerd
+      file:
+        src: "{{ containerd_dst }}"
+        dest: "{{ containerd_src }}"
+        state: link
+
+    # ── Redémarrage ───────────────────────────────────────────────────────────
+    - name: Start containerd
+      systemd:
+        name: containerd
+        state: started
+
+    - name: Wait for containerd socket
+      wait_for:
+        path: /run/containerd/containerd.sock
+        timeout: 30
+
+    - name: Start kubelet
+      systemd:
+        name: kubelet
+        state: started
+
+    - name: Verify symlink
+      command: ls -la /var/lib/containerd
+      register: symlink_check
+      changed_when: false
+
+    - name: Show symlink
+      debug:
+        msg: "{{ symlink_check.stdout }}"
+
+    - name: Show disk usage after migration
+      command: df -h /data /
+      register: df_after
+      changed_when: false
+
+    - name: Show disk usage
+      debug:
+        msg: "{{ df_after.stdout_lines }}"
+
+# ── 3. Uncordon worker-1 + vérification ───────────────────────────────────────
+- name: Uncordon worker-1 and verify
+  hosts: control_plane
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Wait for worker-1 node to be Ready
+      command: >
+        kubectl wait node/worker-1
+        --for=condition=Ready
+        --timeout=120s
+      register: node_ready
+      changed_when: false
+
+    - name: Uncordon worker-1
+      command: kubectl uncordon worker-1
+      changed_when: true
+
+    - name: Show node status
+      command: kubectl get nodes -o wide
+      register: nodes
+      changed_when: false
+
+    - name: Print nodes
+      debug:
+        msg: "{{ nodes.stdout_lines }}"
+
+    - name: Show pods on worker-1
+      command: kubectl get pods -A --field-selector spec.nodeName=worker-1
+      register: pods
+      changed_when: false
+
+    - name: Print pods
+      debug:
+        msg: "{{ pods.stdout_lines }}"
+
+    # ── Nettoyage (optionnel — à valider manuellement) ─────────────────────────
+    - name: "IMPORTANT : supprimez le backup manuellement après validation"
+      debug:
+        msg: >
+          Migration terminée. Validez que tous les pods sont Running, puis supprimez le backup :
+          ssh root@51.158.107.191 'rm -rf /var/lib/containerd.bak'

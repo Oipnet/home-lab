@@ -1,0 +1,23 @@
+---
+# NFS PersistentVolume backed by lb-1 (/data/app-files).
+# Accessible depuis worker-1 ET worker-2 (ReadWriteMany) — aucun nodeAffinity requis.
+#
+# Dupliquer ce fichier pour chaque app qui a besoin du stockage partagé,
+# en ajustant : name, capacity, subPath dans le deployment.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: app-files-pv
+  labels:
+    app.kubernetes.io/part-of: homelab
+    volume: app-files
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nfs-storage
+  nfs:
+    server: 212.47.250.233   # lb-1
+    path: /data/app-files

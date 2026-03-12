@@ -1,0 +1,74 @@
+---
+# Étape 2 — Synchroniser les données de l'ancien serveur vers lb-1 (NFS)
+#
+# Ce playbook lance rsync depuis lb-1 en mode pull (lb-1 tire les données
+# de l'ancien serveur). À lancer une première fois en avance, puis une
+# seconde fois juste avant la bascule DNS pour ne rien perdre.
+#
+# L'option --checksum est utilisée pour la synchro finale (plus lent mais sûr).
+# Par défaut, le mode rapide (timestamp + taille) est utilisé.
+#
+# Usage :
+#   # Synchro initiale (rapide)
+#   ansible-playbook -i inventory/hosts.ini playbooks/migration-sync-data.yml
+#
+#   # Synchro finale avant bascule DNS (plus sûre)
+#   ansible-playbook -i inventory/hosts.ini playbooks/migration-sync-data.yml \
+#     -e "rsync_checksum=true"
+#
+#   # Dry-run pour vérifier ce qui serait transféré
+#   ansible-playbook -i inventory/hosts.ini playbooks/migration-sync-data.yml \
+#     -e "rsync_dry_run=true"
+
+- name: Sync data from old server to lb-1 NFS share
+  hosts: load_balancers
+  become: true
+  gather_facts: false
+
+  vars:
+    old_server_ip: "51.158.68.24"
+    old_data_path: "/var/www/fs-cartes113.forelse.info/var/data/"
+    nfs_data_path: "/data/app-files/"
+    rsync_dry_run: false
+    rsync_checksum: false
+
+  tasks:
+    - name: Ensure rsync is installed
+      apt:
+        name: rsync
+        state: present
+        update_cache: false
+
+    - name: Run rsync from old server (pull mode)
+      command: >
+        rsync
+        --archive
+        --verbose
+        --human-readable
+        --progress
+        --delete
+        {{ '--dry-run' if rsync_dry_run | bool else '' }}
+        {{ '--checksum' if rsync_checksum | bool else '' }}
+        -e "ssh -o StrictHostKeyChecking=no -o BatchMode=yes"
+        root@{{ old_server_ip }}:{{ old_data_path }}
+        {{ nfs_data_path }}
+      register: rsync_result
+      changed_when: >
+        not rsync_dry_run | bool and
+        'Number of created files: 0' not in rsync_result.stdout and
+        'Number of regular files transferred: 0' not in rsync_result.stdout
+
+    - name: Show rsync summary
+      debug:
+        msg: "{{ rsync_result.stdout_lines[-20:] }}"
+
+    - name: Show disk usage after sync
+      command: du -sh {{ nfs_data_path }}
+      register: du_result
+      changed_when: false
+      when: not rsync_dry_run | bool
+
+    - name: Print disk usage
+      debug:
+        msg: "Données dans {{ nfs_data_path }} : {{ du_result.stdout }}"
+      when: not rsync_dry_run | bool

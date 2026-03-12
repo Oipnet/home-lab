@@ -1,0 +1,68 @@
+---
+# Configure lb-1 as NFS server for shared storage accessible by K8s workers.
+# Workers mount this NFS share and expose it via Kubernetes PersistentVolumes.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.ini playbooks/nfs-server-lb1.yml
+#
+# After running: update /etc/exports if you need additional exports,
+# then run: exportfs -ra
+
+- name: Configure NFS server on lb-1
+  hosts: load_balancers
+  become: true
+
+  vars:
+    nfs_export_path: /data/app-files
+    nfs_export_options: "*(rw,sync,no_subtree_check,no_root_squash)"
+    # Restrict to K8s worker IPs for better security (optional: replace * above)
+    nfs_allowed_workers:
+      - 51.158.107.191   # worker-1
+      - 163.172.181.187  # worker-2
+
+  tasks:
+    - name: Install NFS server packages
+      apt:
+        name:
+          - nfs-kernel-server
+        state: present
+        update_cache: true
+
+    - name: Create NFS export directory
+      file:
+        path: "{{ nfs_export_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Configure NFS exports
+      lineinfile:
+        path: /etc/exports
+        line: "{{ nfs_export_path }} {{ nfs_export_options }}"
+        regexp: "^{{ nfs_export_path | regex_escape() }}\\s"
+        state: present
+        create: true
+      notify: reload exports
+
+    - name: Enable and start NFS server
+      systemd:
+        name: nfs-server
+        enabled: true
+        state: started
+
+    - name: Apply exports immediately
+      command: exportfs -ra
+
+    - name: Show active exports
+      command: exportfs -v
+      register: exports_out
+      changed_when: false
+
+    - name: Print exports
+      debug:
+        var: exports_out.stdout_lines
+
+  handlers:
+    - name: reload exports
+      command: exportfs -ra
